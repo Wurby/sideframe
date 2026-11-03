@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sideframe
+Comment=Your Mac desktop, in your Steam Frame
+Exec=@BIN@
+Icon=sideframe
+Terminal=false
+Categories=Utility;
+StartupNotify=false

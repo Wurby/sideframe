@@ -1,0 +1,8 @@
+frame/sideframe
+frame/sideframe-window
+mac/dist/
+mac/.build/
+*.o
+*.log
+logs/
+.DS_Store
