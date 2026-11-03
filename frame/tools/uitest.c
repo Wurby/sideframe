@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
     M.nmacs = 0; UI.mx = 300; UI.my = 450; menu_draw(0); dump(dir, "4_home_empty");
 
     M.scr = SCR_ADD_PICK; menu_draw(0.5); dump(dir, "5_add_pick");
-    disc_macs[0].used = false; menu_draw(0.5); dump(dir, "6_add_pick_searching");
+    disc_macs[0].used = false; M.search_t0 = disc_now(); menu_draw(0.5); dump(dir, "6_add_pick_searching"); M.search_t0 = disc_now() - 10; menu_draw(0.5); dump(dir, "6b_add_pick_still_nothing");
     disc_macs[0].used = true;
 
     snprintf(M.sel_name, sizeof M.sel_name, "Alex’s MacBook Air"); M.scr = SCR_ADD_CODE; strcpy(M.code, "889"); M.ncode = 3; menu_draw(0); dump(dir, "7_add_code");

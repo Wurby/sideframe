@@ -27,7 +27,7 @@ static struct menu {
     struct pair_job job;
     /* connecting */
     struct mac_conf target; double connect_t0; char connect_status[160];
-    int forget_armed; double forget_t;
+    int forget_armed; double forget_t; double search_t0;   /* when the Add-a-Mac search started (for the "still nothing?" help) */
     bool dirty;
     double t_draw;
 } M;
@@ -44,7 +44,10 @@ static void menu_refresh_macs(void) {
     }
     M.dirty = true;
 }
-static void menu_goto(enum scr s) { M.scr = s; M.dirty = true; M.err[0] = 0; M.forget_armed = -1; }
+#ifndef SIDEFRAME_URL
+#define SIDEFRAME_URL ""   /* set at build time (make SIDEFRAME_URL=...) to show where to download the Mac app */
+#endif
+static void menu_goto(enum scr s) { if (s == SCR_ADD_PICK && M.scr != SCR_ADD_PICK) M.search_t0 = disc_now(); M.scr = s; M.dirty = true; M.err[0] = 0; M.forget_armed = -1; }
 static void menu_init(void) {
     memset(&M, 0, sizeof M); M.forget_armed = -1; menu_refresh_macs(); menu_goto(SCR_HOME);
 }
@@ -115,8 +118,8 @@ static void screen_home(double t) {
     if (M.nmacs == 0) {
         ui_rrect(56, 190, 1608, 330, 28, C_CARD); ui_rrect_line(56, 190, 1608, 330, 28, 2, C_LINE);
         ui_text(100, 226, "No Mac paired yet", 42, true, C_TEXT);
-        ui_paragraph(100, 288, 1500, "1.  On your Mac, click the Sideframe icon in the menu bar and choose “Pair a Steam Frame…”.\n2.  Come back here, tap Add a Mac, pick your Mac and type the code it shows.", 28, false, C_TEXT_DIM);
-        if (ui_button(100, 420, 340, 72, "Add a Mac", 0, true, 30)) menu_goto(SCR_ADD_PICK);
+        ui_paragraph(100, 288, 1500, "Install Sideframe on your Mac first if you haven’t (download it from the Sideframe project page).\n1.  On your Mac, click the Sideframe icon in the menu bar and choose “Pair a Steam Frame…”.\n2.  Come back here, tap Add a Mac, pick your Mac and type the code it shows.", 28, false, C_TEXT_DIM);
+        if (ui_button(100, 440, 340, 72, "Add a Mac", 0, true, 30)) menu_goto(SCR_ADD_PICK);
         if (ui_button(MENU_WIDTH - 56 - 240, 628, 240, 60, "Close Sideframe", 3, true, 26)) M.action = ACT_QUIT;
         return;
     }
@@ -183,7 +186,16 @@ static void screen_add_pick(double t) {
         char dots[8] = "..."; dots[(int)(t * 2) % 4] = 0;
         char b[64]; snprintf(b, sizeof b, "Looking for Macs%s", dots);
         ui_text(150, 336, b, 32, true, C_TEXT);
-        ui_paragraph(150, 392, 1300, "Make sure Sideframe is running on your Mac (look for its icon in the menu bar) and that your Mac and this Frame are on the same Wi-Fi.", 24, false, C_TEXT_DIM);
+        if (disc_now() - M.search_t0 < 6.0) ui_paragraph(150, 392, 1300, "Make sure Sideframe is running on your Mac (look for its icon in the menu bar) and that your Mac and this Frame are on the same Wi-Fi.", 24, false, C_TEXT_DIM);
+        else {   /* nothing found for a while: spell out the usual causes */
+            ui_text(150, 392, "Still nothing? Check these:", 26, true, C_TEXT);
+            float yy = 436;
+            char l1[300]; snprintf(l1, sizeof l1, "1.  Is Sideframe installed on your Mac? %s%s", SIDEFRAME_URL[0] ? "Get it at " : "Download it from the Sideframe project page.", SIDEFRAME_URL);
+            yy += ui_paragraph(150, yy, 1450, l1, 24, false, C_TEXT_DIM) + 8;
+            yy += ui_paragraph(150, yy, 1450, "2.  Is its icon in the Mac’s menu bar? If not, open Sideframe from Applications.", 24, false, C_TEXT_DIM) + 8;
+            yy += ui_paragraph(150, yy, 1450, "3.  Are your Mac and this Frame on the same Wi-Fi network (not a guest network)?", 24, false, C_TEXT_DIM) + 8;
+            ui_paragraph(150, yy, 1450, "4.  If your Mac asked to allow incoming connections, choose Allow.", 24, false, C_TEXT_DIM);
+        }
     }
 }
 

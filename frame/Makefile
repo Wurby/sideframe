@@ -10,6 +10,7 @@ COMMON = -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-missi
 CFLAGS += $(COMMON) $(shell pkg-config --cflags wayland-client)
 LDLIBS += $(shell pkg-config --libs wayland-client libavformat libavcodec libavutil libsodium) -lm
 SRC = src/viewer.c $(filter-out src/viewer.c,$(wildcard src/*.c))
+SIDEFRAME_URL ?=   # shown in the app's "install the Mac app" hints, e.g. make SIDEFRAME_URL=github.com/you/sideframe
 OPENVR_INC ?= /opt/steamvr/tools/hellovr_vulkan_linux/src/openvr/headers
 OPENVR_LIB ?= /opt/steamvr/bin/linuxarm64
 VR_LIBS = $(shell pkg-config --libs libavformat libavcodec libavutil libsodium) -L$(OPENVR_LIB) -lopenvr_api -Wl,-rpath,$(OPENVR_LIB) -lvulkan -lm
@@ -25,7 +26,7 @@ src/frag.spv.h: src/shaders/ycbcr.frag
 	glslc -mfmt=c -fshader-stage=frag $< -o $@
 
 sideframe: src/viewer.c $(wildcard src/*.h) src/vert.spv.h src/frag.spv.h
-	$(CC) $(COMMON) $(shell pkg-config --cflags freetype2) -DMD_VR -I$(OPENVR_INC) -Isrc -o $@ src/viewer.c $(VR_LIBS) $(shell pkg-config --libs freetype2) -lpthread
+	$(CC) $(COMMON) $(shell pkg-config --cflags freetype2) -DMD_VR -DSIDEFRAME_URL=\"$(SIDEFRAME_URL)\" -I$(OPENVR_INC) -Isrc -o $@ src/viewer.c $(VR_LIBS) $(shell pkg-config --libs freetype2) -lpthread
 
 install: all
 	PREFIX=$(PREFIX) ./install.sh
