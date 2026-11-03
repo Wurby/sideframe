@@ -28,21 +28,10 @@ sideframe: src/viewer.c $(wildcard src/*.h) src/vert.spv.h src/frag.spv.h
 	$(CC) $(COMMON) $(shell pkg-config --cflags freetype2) -DMD_VR -I$(OPENVR_INC) -Isrc -o $@ src/viewer.c $(VR_LIBS) $(shell pkg-config --libs freetype2) -lpthread
 
 install: all
-	install -Dm755 sideframe $(PREFIX)/bin/sideframe
-	install -Dm755 sideframe-window $(PREFIX)/bin/sideframe-window
-	install -Dm755 tools/launch.sh $(PREFIX)/bin/sideframe-launch
-	install -Dm644 assets/fonts/NotoSans-Regular.ttf $(PREFIX)/share/sideframe/fonts/NotoSans-Regular.ttf
-	install -Dm644 assets/fonts/NotoSans-Bold.ttf $(PREFIX)/share/sideframe/fonts/NotoSans-Bold.ttf
-	install -Dm644 assets/fonts/LICENSE $(PREFIX)/share/sideframe/fonts/LICENSE
-	install -Dm644 assets/sideframe-1024.png $(PREFIX)/share/icons/hicolor/1024x1024/apps/sideframe.png
-	install -Dm644 assets/sideframe-256.png $(PREFIX)/share/icons/hicolor/256x256/apps/sideframe.png
-	sed 's|@BIN@|$(PREFIX)/bin/sideframe-launch|' assets/sideframe.desktop.in | install -Dm644 /dev/stdin $(PREFIX)/share/applications/sideframe.desktop
-	@echo "Installed. Find 'Sideframe' in your app list (add it to Steam as a non-Steam game for the Frame's library)."
+	PREFIX=$(PREFIX) ./install.sh
 
 uninstall:
-	rm -f $(PREFIX)/bin/sideframe $(PREFIX)/bin/sideframe-window $(PREFIX)/bin/sideframe-launch $(PREFIX)/share/applications/sideframe.desktop
-	rm -rf $(PREFIX)/share/sideframe
-	rm -f $(PREFIX)/share/icons/hicolor/1024x1024/apps/sideframe.png $(PREFIX)/share/icons/hicolor/256x256/apps/sideframe.png
+	PREFIX=$(PREFIX) ./install.sh --uninstall
 
 clean:
 	rm -f sideframe sideframe-window

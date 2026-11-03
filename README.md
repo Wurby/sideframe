@@ -22,30 +22,37 @@ Frame: UDP → loss repair → V4L2 hardware decode → dmabuf → Vulkan → St
 
 ## Requirements
 
-* **Mac:** macOS 13+ (ScreenCaptureKit), Xcode command-line tools (`swiftc`). Same local network as the Frame.
-* **Frame:** SteamOS on the Steam Frame with SteamVR installed. Build tools: `gcc`, `make`, `pkg-config`, `glslc`, and dev packages for
-  `libavformat/libavcodec/libavutil` (ffmpeg), `libsodium`, `freetype2`, `vulkan`, `wayland-client`. The OpenVR headers ship with SteamVR
-  (`/opt/steamvr/tools/hellovr_vulkan_linux/...`); override with `OPENVR_INC=` / `OPENVR_LIB=`.
+* **Mac:** macOS 13+ (ScreenCaptureKit). Same local network as the Frame.
+* **Frame:** SteamOS on the Steam Frame with SteamVR installed (the prebuilt download needs nothing else; building from source needs the tools listed under Install).
+  The OpenVR headers ship with SteamVR (`/opt/steamvr/tools/hellovr_vulkan_linux/...`); override with `OPENVR_INC=` / `OPENVR_LIB=`.
 
 ## Install
 
-**Mac**
+Download both files from the [latest release](../../releases/latest) (replace the link with your repository's releases page).
+
+**1. Mac** — `sideframe-mac-X.zip`
 
 ```sh
-cd mac && ./build-app.sh        # builds and installs ~/Applications/Sideframe.app (ad-hoc signed)
-open ~/Applications/Sideframe.app
+unzip sideframe-mac-*.zip && cd sideframe-mac-* && ./install.sh
 ```
 
-Grant **Screen Recording** (to see the screen) and **Accessibility** (so the Frame can move the pointer and type) when asked.
-The app is ad-hoc signed, so macOS asks again after each rebuild you install.
+This puts Sideframe in `~/Applications` and opens it (menu-bar icon). Allow **Screen Recording** and **Accessibility** when macOS asks.
+The app is ad-hoc signed, not notarized; the installer clears the download quarantine flag. If you rather open it by hand, right-click → Open.
 
-**Frame**
+**2. Steam Frame** — `sideframe-frame-X-aarch64.tar.gz` (in Desktop Mode: open a terminal)
 
 ```sh
-cd frame && make && make install     # installs to ~/.local (no root)
+tar xzf sideframe-frame-*.tar.gz && cd sideframe-frame-* && ./install.sh
 ```
 
-Then find **Sideframe** in the app list. To launch it from the Frame's library, add it as a non-Steam game.
+No root, nothing system-wide: it installs into `~/.local` and adds a "Sideframe" entry to the app list. `./install.sh --uninstall` removes it.
+To launch it from the Frame's library, add Sideframe as a non-Steam game.
+
+**Build from source instead:** `git clone` the repo, then `cd mac && ./install.sh` and `cd frame && ./install.sh` — each builds first if there is no
+prebuilt program. Build tools: Mac needs Apple's command-line tools (`xcode-select --install`); the Frame needs `gcc make pkg-config glslc` and
+the dev packages for ffmpeg, libsodium, freetype2, vulkan and wayland-client.
+
+Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh` (on a Mac) build the release downloads into `dist/`.
 
 ## Pairing (no SSH, no config files)
 

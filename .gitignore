@@ -6,3 +6,4 @@ mac/.build/
 *.log
 logs/
 .DS_Store
+dist/
