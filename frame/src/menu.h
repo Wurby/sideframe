@@ -3,10 +3,18 @@
 #ifndef MENU_H
 #define MENU_H
 #include <pthread.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include "ui.h"
 #include "discovery.h"
 #include "pairing_client.h"
 
+#ifndef SIDEFRAME_VERSION
+#define SIDEFRAME_VERSION "dev"
+#endif
+#ifndef SIDEFRAME_UPDATE_URL
+#define SIDEFRAME_UPDATE_URL ""   /* URL of a text file holding the latest version number, e.g. 0.1.1 ; empty = no update check */
+#endif
 #define MENU_WIDTH 1720
 #define MENU_HEIGHT 720
 #define MAX_MACS 8
@@ -30,7 +38,11 @@ static struct menu {
     int forget_armed; double forget_t; double search_t0;   /* when the Add-a-Mac search started (for the "still nothing?" help) */
     bool dirty;
     double t_draw;
+    /* health (checked every few seconds) and the manual update check */
+    bool net_ok, dec_ok; double health_t;
+    int upd_state; char upd_ver[40];          /* 0 idle, 1 checking, 2 up to date, 3 newer version exists, 4 couldn't check */
 } M;
+static void menu_health(double t);
 
 /* ---------------------------------------------------------------- helpers */
 static void menu_banner(uint32_t color, const char *text) { snprintf(M.banner, sizeof M.banner, "%s", text); M.banner_color = color; M.banner_until = disc_now() + 9; M.dirty = true; }
@@ -73,6 +85,7 @@ static void menu_start_pairing(void) {
 static bool menu_tick(double t) {
     bool d = M.dirty; M.dirty = false;
     if (disc_poll()) d = true;
+    menu_health(t);
     if (M.banner[0] && t > M.banner_until) { M.banner[0] = 0; d = true; }
     if (M.forget_armed >= 0 && t - M.forget_t > 3.5) { M.forget_armed = -1; d = true; }
     if (M.scr == SCR_PAIRING) {
@@ -95,15 +108,75 @@ static void header(void) {
     ui_text(160, 32, "Sideframe", 54, true, C_TEXT);
     ui_text(162, 96, "Your Mac desktop, in your Steam Frame.", 24, false, C_TEXT_DIM);
 }
+/* ---------------------------------------------------------------- health: is there a network, can this Frame decode video? */
+static bool health_has_network(void) {
+    struct ifaddrs *ifa, *p; bool ok = false;
+    if (getifaddrs(&ifa) != 0) return true;                    /* can't tell: don't nag */
+    for (p = ifa; p; p = p->ifa_next) {
+        if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET || !(p->ifa_flags & IFF_UP) || (p->ifa_flags & IFF_LOOPBACK)) continue;
+        uint32_t a = ntohl(((struct sockaddr_in *)p->ifa_addr)->sin_addr.s_addr);
+        if ((a >> 16) == 0xA9FE) continue;                     /* 169.254.x.x: no real address yet */
+        ok = true; break;
+    }
+    freeifaddrs(ifa); return ok;
+}
+static void menu_health(double t) {
+    if (t - M.health_t < 3.0) return;
+    M.health_t = t; bool n = health_has_network(), d = access("/dev/video-dec0", R_OK | W_OK) == 0;
+    if (n != M.net_ok || d != M.dec_ok) M.dirty = true;
+    M.net_ok = n; M.dec_ok = d;
+}
+/* the most important problem right now, or NULL */
+static const char *health_problem(void) {
+    if (!M.dec_ok && M.health_t > 0) return "This Frame’s video decoder isn’t available, so Sideframe can’t show video. Restart the Frame and try again.";
+    if (!M.net_ok && M.health_t > 0) return "This Frame isn’t connected to a network. Connect to the same Wi-Fi as your Mac.";
+    return NULL;
+}
+
+/* ---------------------------------------------------------------- update check (manual; one small request, only when the user presses the button) */
+static int ver_cmp(const char *a, const char *b) {            /* dotted numbers: 0.1.10 > 0.1.9 */
+    for (int i = 0; i < 4; i++) { long x = strtol(a, (char **)&a, 10), y = strtol(b, (char **)&b, 10); if (x != y) return x < y ? -1 : 1; if (*a == '.') a++; if (*b == '.') b++; }
+    return 0;
+}
+static void *update_thread(void *arg) {
+    (void)arg; char cmd[400], out[64] = {0};
+    snprintf(cmd, sizeof cmd, "curl -fsSL --max-time 8 --proto '=https' '%s' 2>/dev/null", SIDEFRAME_UPDATE_URL);
+    FILE *f = popen(cmd, "r"); if (f) { if (!fgets(out, sizeof out, f)) out[0] = 0; pclose(f); }
+    out[strcspn(out, "\r\n ")] = 0;
+    bool ok = out[0] >= '0' && out[0] <= '9';
+    if (!ok) M.upd_state = 4;
+    else { snprintf(M.upd_ver, sizeof M.upd_ver, "%s", out); M.upd_state = ver_cmp(SIDEFRAME_VERSION, out) < 0 ? 3 : 2; }
+    M.dirty = true; return NULL;
+}
+static void menu_check_update(void) {
+    if (M.upd_state == 1 || !SIDEFRAME_UPDATE_URL[0]) return;
+    M.upd_state = 1; pthread_t th; if (pthread_create(&th, NULL, update_thread, NULL) == 0) pthread_detach(th); else M.upd_state = 4;
+    M.dirty = true;
+}
+static void draw_footer(float x) {                              /* version + update line, bottom centre of Home */
+    char b[160]; uint32_t c = C_TEXT_FAINT;
+    if (!SIDEFRAME_UPDATE_URL[0]) { snprintf(b, sizeof b, "Sideframe %s", SIDEFRAME_VERSION); }
+    else switch (M.upd_state) {
+        case 1: snprintf(b, sizeof b, "Sideframe %s  ·  checking for updates…", SIDEFRAME_VERSION); break;
+        case 2: snprintf(b, sizeof b, "Sideframe %s  ·  up to date", SIDEFRAME_VERSION); c = C_GREEN; break;
+        case 3: snprintf(b, sizeof b, "Sideframe %s  ·  version %s is available (see the project page)", SIDEFRAME_VERSION, M.upd_ver); c = C_AMBER; break;
+        case 4: snprintf(b, sizeof b, "Sideframe %s  ·  couldn’t check for updates (no internet?)", SIDEFRAME_VERSION); break;
+        default: snprintf(b, sizeof b, "Sideframe %s", SIDEFRAME_VERSION);
+    }
+    ui_text(x, 650, b, 22, false, c);
+    if (SIDEFRAME_UPDATE_URL[0] && M.upd_state != 1) { float w = ui_text_w(b, 22, false); if (x + w + 24 + 220 < MENU_WIDTH - 56 - 300 - 16 && ui_button(x + w + 24, 636, 220, 48, "Check for updates", 3, true, 20)) menu_check_update(); }
+}
+
 static void draw_banner(void) {
-    if (!M.banner[0]) return;
+    const char *msg = M.banner[0] ? M.banner : health_problem(); uint32_t col = M.banner[0] ? M.banner_color : C_AMBER;
+    if (!msg) return;
     float w = 640, x = MENU_WIDTH - 56 - w;
-    ui_dry = true; float h = ui_paragraph(0, 0, w - 56, M.banner, 24, false, C_TEXT); ui_dry = false;
+    ui_dry = true; float h = ui_paragraph(0, 0, w - 56, msg, 24, false, C_TEXT); ui_dry = false;
     float bh = h + 32;
     ui_rrect(x, 36, w, bh, 20, RGBA(0x10, 0x18, 0x2a, 255));
-    ui_rrect_line(x, 36, w, bh, 20, 2, M.banner_color);
-    ui_circle(x + 28, 36 + bh / 2, 8, M.banner_color);
-    ui_paragraph(x + 52, 36 + 16, w - 76, M.banner, 24, false, C_TEXT);
+    ui_rrect_line(x, 36, w, bh, 20, 2, col);
+    ui_circle(x + 28, 36 + bh / 2, 8, col);
+    ui_paragraph(x + 52, 36 + 16, w - 76, msg, 24, false, C_TEXT);
 }
 static const char *mac_status(int i, uint32_t *color, struct disc_mac **found) {
     struct disc_mac *f = disc_find_id(M.macs[i].id); if (found) *found = f;
@@ -121,6 +194,7 @@ static void screen_home(double t) {
         ui_paragraph(100, 288, 1500, "Install Sideframe on your Mac first if you haven’t (download it from the Sideframe project page).\n1.  On your Mac, click the Sideframe icon in the menu bar and choose “Pair a Steam Frame…”.\n2.  Come back here, tap Add a Mac, pick your Mac and type the code it shows.", 28, false, C_TEXT_DIM);
         if (ui_button(100, 440, 340, 72, "Add a Mac", 0, true, 30)) menu_goto(SCR_ADD_PICK);
         if (ui_button(MENU_WIDTH - 56 - 240, 628, 240, 60, "Close Sideframe", 3, true, 26)) M.action = ACT_QUIT;
+        draw_footer(56);
         return;
     }
     ui_text(56, 168, "YOUR MACS", 20, true, C_TEXT_FAINT);
@@ -156,9 +230,11 @@ static void screen_home(double t) {
     if (M.nmacs > 3) { char b[64]; snprintf(b, sizeof b, "…and %d more", M.nmacs - 3); ui_text(56, 590, b, 22, false, C_TEXT_FAINT); }
     if (ui_button(56, 632, 280, 60, "Add a Mac", 1, true, 26)) menu_goto(SCR_ADD_PICK);
     if (ui_button(MENU_WIDTH - 56 - 300, 632, 300, 60, "Close Sideframe", 3, true, 26)) M.action = ACT_QUIT;
+    draw_footer(360);
 }
 
 static void screen_add_pick(double t) {
+    draw_banner();
     if (ui_button(40, 36, 150, 56, "‹  Back", 3, true, 26)) { menu_goto(SCR_HOME); return; }
     ui_text(56, 110, "Add a Mac", 54, true, C_TEXT);
     ui_paragraph(56, 184, 1600, "On your Mac, click the Sideframe icon in the menu bar and choose “Pair a Steam Frame…”. Then pick your Mac below.", 28, false, C_TEXT_DIM);

@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); V=$(cat "$ROOT/VERSION")
 [ "$(uname -m)" = aarch64 ] || { echo "Build the Frame release on a Steam Frame (aarch64)."; exit 1; }
-(cd "$ROOT/frame" && make -B all)
+(cd "$ROOT/frame" && env -u LD_LIBRARY_PATH make -B all)
 OUT="$ROOT/dist"; STAGE="$OUT/sideframe-frame-$V"; rm -rf "$STAGE"; mkdir -p "$STAGE/assets/fonts"
 cd "$ROOT/frame"
 cp sideframe sideframe-window install.sh "$STAGE/"; cp tools/launch.sh "$STAGE/launch.sh"

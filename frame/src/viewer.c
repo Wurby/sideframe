@@ -19,7 +19,21 @@
 #ifndef MD_VR
 #include <wayland-client.h>
 #endif
+#ifdef HAVE_FFMPEG   /* optional: only for playing a raw .h265 file (a test mode). Without it Sideframe needs no ffmpeg at all, so system ffmpeg updates can't break it. */
 #include <libavformat/avformat.h>
+#else
+typedef struct { int codec_id; } AVCodecParameters; typedef struct { AVCodecParameters *codecpar; } AVStream;
+typedef struct AVFormatContext { AVStream **streams; } AVFormatContext; typedef struct { uint8_t *data; int size, stream_index; } AVPacket;
+#define AVMEDIA_TYPE_VIDEO 0
+#define AV_CODEC_ID_HEVC 173
+static int avformat_open_input(AVFormatContext **c, const char *p, void *a, void *b) { (void)c; (void)p; (void)a; (void)b; return -1; }
+static int avformat_find_stream_info(AVFormatContext *c, void *o) { (void)c; (void)o; return -1; }
+static int av_find_best_stream(AVFormatContext *c, int t, int a, int b, void *d, int f) { (void)c; (void)t; (void)a; (void)b; (void)d; (void)f; return -1; }
+static int av_read_frame(AVFormatContext *c, AVPacket *p) { (void)c; (void)p; return -1; }
+static void avformat_close_input(AVFormatContext **c) { (void)c; }
+static AVPacket *av_packet_alloc(void) { return calloc(1, sizeof(AVPacket)); }
+static void av_packet_unref(AVPacket *p) { (void)p; }
+#endif
 #include <signal.h>
 #include <netdb.h>
 #include <sodium.h>
@@ -502,6 +516,7 @@ static void decoder_close(void) {
     close(vfd); vfd = -1; cap_ready = false; ncap = 0;
 }
 static bool session_start(const struct mac_conf *mc, char *err, size_t en) {
+    if (access("/dev/video-dec0", R_OK | W_OK) != 0) { snprintf(err, en, "This Frame’s video decoder isn’t available. Restart the Frame and try again."); return false; }
     set_psk(mc->key);
     if (!udp_connect(mc->host, mc->port)) { snprintf(err, en, "Can’t find “%s” on the network.", mc->name); return false; }
     open_decoder();
@@ -642,7 +657,7 @@ int main(int argc, char **argv) {
     if (!menu_mode)
 #endif
     {
-        if (avformat_open_input(&fc, path, NULL, NULL) < 0) { fprintf(stderr, "cannot open %s\n", path); return 1; }
+        if (avformat_open_input(&fc, path, NULL, NULL) < 0) { fprintf(stderr, "cannot open %s (playing files needs a build with HAVE_FFMPEG=1)\n", path); return 1; }
         avformat_find_stream_info(fc, NULL);
         si = av_find_best_stream(fc, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
         if (si < 0 || fc->streams[si]->codecpar->codec_id != AV_CODEC_ID_HEVC) { fprintf(stderr, "not an HEVC stream\n"); return 1; }

@@ -29,7 +29,8 @@ int main(int argc, char **argv) {
     snprintf(M.banner, sizeof M.banner, "Paired with “Alex’s MacBook Air”. Tap Connect to start."); M.banner_color = C_GREEN; M.banner_until = 1e9;
     M.needs_repair[0] = true; UI.mx = 1100; menu_draw(0); dump(dir, "2_home_pair_again_banner");
 
-    M.banner[0] = 0; M.needs_repair[0] = false; fake_mac(1, "Studio Mac mini", "1122334455667788"); M.nmacs = 2; menu_draw(0); dump(dir, "3_home_two_macs");
+    M.banner[0] = 0; M.needs_repair[0] = false; fake_mac(1, "Studio Mac mini", "1122334455667788"); M.nmacs = 2; M.net_ok = true; M.dec_ok = true; M.health_t = 1; M.upd_state = 3; snprintf(M.upd_ver, sizeof M.upd_ver, "0.2.0"); menu_draw(0); dump(dir, "3_home_two_macs");
+    M.net_ok = false; menu_draw(0); dump(dir, "3b_home_no_network"); M.net_ok = true; M.upd_state = 0;
 
     M.nmacs = 0; UI.mx = 300; UI.my = 450; menu_draw(0); dump(dir, "4_home_empty");
 

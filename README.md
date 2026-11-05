@@ -19,6 +19,7 @@ Frame: UDP → loss repair → V4L2 hardware decode → dmabuf → Vulkan → St
 * No CPU copies of video on the Frame (decoder buffers are imported straight into Vulkan).
 * Everything on the wire is ChaCha20-Poly1305 encrypted with a per-pair key; see [docs/PROTOCOL.md](docs/PROTOCOL.md) and [SECURITY.md](SECURITY.md).
 * The picture is sized from the headset's resolution, not hard-coded, so any Mac display works.
+* The Frame program links only libsodium, freetype and the Vulkan/OpenVR runtime — no ffmpeg — so SteamOS updates to system video libraries can't break it.
 
 ## Requirements
 
@@ -50,7 +51,7 @@ To launch it from the Frame's library, add Sideframe as a non-Steam game.
 
 **Build from source instead:** `git clone` the repo, then `cd mac && ./install.sh` and `cd frame && ./install.sh` — each builds first if there is no
 prebuilt program. Build tools: Mac needs Apple's command-line tools (`xcode-select --install`); the Frame needs `gcc make pkg-config glslc` and
-the dev packages for ffmpeg, libsodium, freetype2, vulkan and wayland-client.
+the dev packages for libsodium, freetype2, vulkan and wayland-client (no ffmpeg needed).
 
 Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh` (on a Mac) build the release downloads into `dist/`.
 
@@ -66,6 +67,11 @@ Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh
 * Point the laser at the tab to move the Mac's pointer; click, right-click and scroll work.
 * The keyboard button under the tab opens the SteamVR keyboard. A physical or Bluetooth keyboard types into the Mac while the laser is on the tab.
 * `sideframe --help`-style options: `--scale F` (force a fixed fraction of the Mac's resolution), `--max-fps N`, `--idle-exit SECONDS`.
+
+## Updates
+
+The Frame's home screen shows its version. Maintainers can set `make SIDEFRAME_UPDATE_URL=https://…/latest.txt` (a text file containing the newest
+version number); the app then shows a **Check for updates** button. It makes one small request only when pressed — never in the background.
 
 ## Known limits
 

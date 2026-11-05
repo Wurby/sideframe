@@ -27,7 +27,7 @@ if [ ! -x ./sideframe ]; then
   [ -f Makefile ] || die "No programs and no source here. Download the release from the Sideframe page and run install.sh from the unpacked folder."
   say "Building from source (this takes about a minute)…"
   for t in gcc make pkg-config glslc; do command -v "$t" >/dev/null || die "Missing build tool: $t (the README lists what to install)."; done
-  make
+  env -u LD_LIBRARY_PATH make
 fi
 LAUNCH=launch.sh; [ -f "$LAUNCH" ] || LAUNCH=tools/launch.sh
 [ -f "$LAUNCH" ] || die "launch.sh is missing from this download."
