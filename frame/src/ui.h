@@ -48,7 +48,8 @@ static bool ui_load_fonts(const char *dir_hint) {
     if (FT_Init_FreeType(&ft_lib)) return false;
     char home_fonts[512] = ""; if (getenv("HOME")) snprintf(home_fonts, sizeof home_fonts, "%s/.local/share/sideframe/fonts", getenv("HOME"));
     const char *dirs[] = { dir_hint, getenv("SIDEFRAME_FONT_DIR"), "assets/fonts", home_fonts, "/usr/share/sideframe/fonts", "/usr/share/fonts/noto", "/usr/share/fonts/TTF", NULL };
-    for (int i = 0; dirs[i] && !ft_ready; i++) {
+    for (int i = 0; i < (int)(sizeof dirs / sizeof dirs[0]) && !ft_ready; i++) {
+        if (!dirs[i] || !dirs[i][0]) continue;   /* an unset env var is NULL: skip it, keep looking */
         char a[640], b[640]; snprintf(a, sizeof a, "%s/NotoSans-Regular.ttf", dirs[i]); snprintf(b, sizeof b, "%s/NotoSans-Bold.ttf", dirs[i]);
         if (!FT_New_Face(ft_lib, a, 0, &ft_reg)) { if (FT_New_Face(ft_lib, b, 0, &ft_bold)) ft_bold = ft_reg; ft_ready = true; }
     }
