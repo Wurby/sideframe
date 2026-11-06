@@ -170,7 +170,7 @@ static float cog_alpha, cog_rendered = -1, cog_cx, cog_cy, cog_r; static bool co
 static int side_w;                            /* width of the transparent strip beside the picture that holds the cog */
 static bool menu_over;                        /* the menu is showing over a live session (the picture is paused until "Back to Mac") */
 static int vr_last_idx = -1, vr_since_present;   /* last frame shown, to redraw it when only the cog changed (safe for a few frames: the decoder reuses buffers in order) */
-static void cog_geom(int vw, int vh) { cog_r = side_w * 0.30f; cog_cx = vw + side_w * 0.5f; cog_cy = vh * 0.5f; }   /* centred in the strip beside the picture, halfway down */
+static void cog_geom(int vw, int vh) { cog_r = side_w * 0.30f; cog_cx = vw + side_w * 0.5f; cog_cy = vh - cog_r * 1.6f; }   /* in the strip beside the picture, at the bottom-right */
 static bool cog_hit(float x, float y, float k, int vh) { float dx = x - cog_cx, dy = (vh - y) - cog_cy; return dx * dx + dy * dy < cog_r * k * cog_r * k; }
 
 /* copy the staging buffer into a region of a texture; the texture ends up in COLOR_ATTACHMENT_OPTIMAL (what SteamVR is given) */
@@ -610,9 +610,9 @@ static void vr_poll(void) {
     kbd_service(t, vr_view == VIEW_STREAM && tab_visible && (kb_focus || t - kb_focus_t < 1.5), kb_send);
     if (therm_poll(t)) { fprintf(stderr, "temperature %d C: %s\n", therm_temp_c, therm_level == 0 ? "back to normal" : therm_level == 1 ? "easing off (warm)" : "easing off a lot (hot)"); menu_need = true; }
     if (vr_view == VIEW_STREAM && t - q_sent_t >= 2.0) {
-        q_sent_t = t; static int lf = -1, lp = -1; int f = eff_mac_fps(), pc = eff_mac_bitrate_pct();
-        if (f != lf || pc != lp) { lf = f; lp = pc; fprintf(stderr, "asking the Mac for at most %d pictures/s and %d%% of its video data\n", f, pc); }
-        udp_msg(12, (uint32_t)f, (uint32_t)pc, NULL, 0);
+        q_sent_t = t; static int lf = -1, lp = -1; int f = eff_mac_fps(), pc = eff_mac_bitrate_pct(), qp = eff_mac_maxqp();
+        if (f != lf || pc != lp) { lf = f; lp = pc; fprintf(stderr, "asking the Mac for at most %d pictures/s, %d%% of its video data, quality ceiling QP %d\n", f, pc, qp); }
+        udp_msg(12, (uint32_t)f, (uint32_t)pc | ((uint32_t)qp << 16), NULL, 0);   /* b: low 16 bits = bitrate %, high 16 = encoder QP ceiling */
     }   /* tell the Mac how much to send (idempotent re-send) */
     if ((!tab_visible || menu_over) && !vr_force_visible && t - last_pause_t >= 1.0) { udp_msg(11, 1, 0, NULL, 0); last_pause_t = t; }   /* idempotent re-send: survives reconnects and lost packets */
     if (tab_visible || vr_force_visible) hidden_since = 0;

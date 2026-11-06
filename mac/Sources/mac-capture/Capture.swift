@@ -38,6 +38,12 @@ final class Encoder {
         VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFTypeRef)
         if useLimit { VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits, value: [Int(Double(bitrate) * 1.5 / 8), 1] as CFArray) }
     }
+    /// Cap how coarse any frame may be (HEVC QP, lower = cleaner). A still desktop otherwise gets very few bits and text stays soft whatever the bitrate setting.
+    func setMaxQP(_ qp: Int) {
+        guard let s = session else { return }
+        let st = VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: qp as CFTypeRef)
+        print("encoder quality ceiling QP \(qp): \(st == noErr ? "accepted" : "not supported (status \(st))")")
+    }
     func encode(_ pb: CVPixelBuffer, pts: CMTime, tCb: UInt64, capLagUs: Double) {
         let seq = nextSeq; nextSeq &+= 1
         statsLock.lock(); outstanding += 1
@@ -111,15 +117,16 @@ final class Capture: NSObject, SCStreamOutput {
     // quality requested by the Frame (Stats: wantFps / wantPct) applied to the running capture
     var stream: SCStream?; var cfg: SCStreamConfiguration?
     var baseFps = 60, baseBitrate = 20_000_000
-    private var appliedFps = 0, appliedPct = 100
+    private var appliedFps = 0, appliedPct = 100, appliedQP = 0
     func applyWantedQuality() {
-        statsLock.lock(); let wf = wantFps, wp = wantPct; statsLock.unlock()
+        statsLock.lock(); let wf = wantFps, wp = wantPct, wq = wantMaxQP; statsLock.unlock()
         let fps = wf > 0 ? min(wf, baseFps) : baseFps
         if fps != appliedFps, let cfg, let stream {
             appliedFps = fps; cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
             stream.updateConfiguration(cfg) { _ in }
             print("capture rate set to \(fps) fps (the Frame asked for \(wf == 0 ? "no limit" : "\(wf)"))")
         }
+        if wq != appliedQP, wq > 0 { appliedQP = wq; enc.setMaxQP(wq) }
         if wp != appliedPct { appliedPct = wp; enc.setBitrate(baseBitrate * wp / 100); print("bitrate set to \(baseBitrate * wp / 100 / 1_000_000) Mbps (\(wp)%)") }
     }
     private var lastPB: CVPixelBuffer?

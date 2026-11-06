@@ -116,7 +116,7 @@ final class Server {
         // (A replayed HELLO from an attacker can create a pending session, but never gets promoted: it cannot produce valid DATA.)
         if let pend, sockaddrEqual(pp, sa), nowNs() - pat < 10_000_000_000, let plain = pend.open(pkt) {
             paused = false
-            statsLock.lock(); wantFps = 0; wantPct = 100; statsLock.unlock()   // a new session starts with no quality request from an earlier one
+            statsLock.lock(); wantFps = 0; wantPct = 100; wantMaxQP = 0; statsLock.unlock()   // a new session starts with no quality request from an earlier one
             lock.lock(); let replaced = active != nil; active = pend; activeName = pname; peer = sa; lastRxNs = nowNs(); pendingSession = nil; lock.unlock()
             if replaced { onSessionEnd?() }
             print("\(pname) authenticated from \(describe(sa)) — session started")
@@ -156,7 +156,7 @@ final class Server {
             for idx in list where idx < pk.count { var q = pk[idx]; q[q.startIndex + 8] |= 2; sendPlain(q); statsLock.lock(); retxSent += 1; statsLock.unlock() }
             statsLock.lock(); nacksRx += 1; statsLock.unlock()
         case 12:  // QUALITY: seq = frame-rate ceiling (0 = none), val = percent of the automatic bitrate (clamped 25...200)
-            statsLock.lock(); wantFps = Int(min(seq, 120)); wantPct = Int(min(max(val, 25), 200)); statsLock.unlock()
+            statsLock.lock(); wantFps = Int(min(seq, 120)); wantPct = Int(min(max(val & 0xFFFF, 25), 200)); let q = Int(val >> 16); wantMaxQP = (q >= 16 && q <= 51) ? q : 0; statsLock.unlock()
         case 3:   // keyframe request
             statsLock.lock(); forceKey = true; keyRequests += 1; statsLock.unlock()
         case 13:  // BYE: the Frame is leaving: end the session now instead of waiting for the 4 s silence timeout

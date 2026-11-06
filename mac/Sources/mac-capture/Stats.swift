@@ -6,7 +6,7 @@ let statsLock = NSLock()
 var outstanding = 0, skippedByWindow = 0, keyRequests = 0
 var forceKey = false
 // What the Frame asked for (message type 12): a frame-rate ceiling and a share of the automatic bitrate. 0 / 100 = no request.
-var wantFps = 0, wantPct = 100
+var wantFps = 0, wantPct = 100, wantMaxQP = 0   // wantMaxQP: 0 = encoder default
 var lastForcedKeyNs: UInt64 = 0
 var ackedNext: UInt32 = 0
 var lastAckNs: UInt64 = 0

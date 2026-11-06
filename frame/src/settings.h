@@ -97,6 +97,8 @@ static double eff_min_interval(void) {            /* seconds between overlay upd
 /* widest texture sent, as a multiple of the headset's render width */
 static double eff_size_factor(void) { return ST.preset == P_QUALITY ? 1.5 : ST.preset == P_BALANCED ? 1.2 : 1.0; }
 static int eff_mac_fps(void) { int f = (int)(1.0 / eff_min_interval() + 0.5); return f < 8 ? 8 : f; }   /* the Mac sends only as many pictures as we will show */
+/* encoder quality floor (HEVC QP ceiling) per preset: lower = cleaner detail even on a still desktop, whatever the bitrate budget */
+static int eff_mac_maxqp(void) { return ST.preset == P_QUALITY ? 26 : ST.preset == P_BALANCED ? 31 : 37; }
 /* percent of the Mac's automatic bitrate (about 5 Mbps per megapixel) */
 static int eff_mac_bitrate_pct(void) {
     int p = ST.preset == P_QUALITY ? 140 : ST.preset == P_BALANCED ? 100 : 60;
