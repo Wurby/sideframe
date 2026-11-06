@@ -95,7 +95,7 @@ Forks can point it elsewhere: `make SIDEFRAME_UPDATE_URL=https://…/latest.txt`
 
 * One Mac display (the main one) is mirrored; no virtual displays.
 * Not an on-screen keyboard replacement for third-party keyboard apps yet (they type into the compositor focus, not overlays).
-* The Mac app is ad-hoc signed; a Developer ID build would keep permissions across updates.
+* The Mac app is ad-hoc signed, so after each update macOS asks for Screen Recording and Accessibility again. `mac/install.sh` clears the old entries for you; if you replace the app by hand, remove "Sideframe" from both lists in System Settings → Privacy & Security and add it again (switching the old entry off and on does nothing). A Developer ID build would keep permissions across updates.
 
 ## Contributing
 

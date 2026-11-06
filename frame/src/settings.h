@@ -79,7 +79,7 @@ static double eff_min_interval(void) {            /* seconds between overlay upd
     double th = therm_level == 2 ? 1.0 / 8 : therm_level == 1 ? 1.0 / 15 : 0;
     return th > q ? th : q;
 }
-static double eff_size_factor(void) { return ST.quality == Q_EFFICIENT ? 0.9 : 1.2; }   /* x the headset's render width: widest texture sent */
-static int eff_mac_fps(void) { return therm_level == 2 ? 24 : (therm_level == 1 || ST.quality == Q_EFFICIENT) ? 30 : 60; }
+static double eff_size_factor(void) { return ST.quality == Q_EFFICIENT ? 1.0 : 1.5; }   /* x the headset's render width: widest texture sent */
+static int eff_mac_fps(void) { int f = (int)(1.0 / eff_min_interval() + 0.5); return f < 8 ? 8 : f; }   /* the Mac sends only as many pictures as we will show: each one then gets more bits */
 static int eff_mac_bitrate_pct(void) { return therm_level ? 50 : ST.quality == Q_EFFICIENT ? 60 : 100; }
 #endif

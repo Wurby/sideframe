@@ -17,7 +17,15 @@ else
   say "Building Sideframe (about a minute)…"; INSTALL=0 ./build-app.sh >/dev/null; SRC=dist/Sideframe.app
 fi
 pkill -x Sideframe 2>/dev/null || true
+UPDATING=0; [ -d "$DEST" ] && UPDATING=1
 mkdir -p "$HOME/Applications"; rm -rf "$DEST"; cp -R "$SRC" "$DEST"
+# The app is ad-hoc signed, so every new build looks like a different app to macOS and the old Screen Recording / Accessibility entries stop
+# working (switching them off and on does nothing). Clear them so macOS asks fresh instead of leaving a dead entry to remove by hand.
+if [ "$UPDATING" = 1 ]; then
+  tccutil reset ScreenCapture org.sideframe.Sideframe >/dev/null 2>&1 || true
+  tccutil reset Accessibility org.sideframe.Sideframe >/dev/null 2>&1 || true
+  say "Updated. macOS will ask for the two permissions again (the old entries were cleared for you)."
+fi
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true   # a downloaded copy is flagged by Gatekeeper; this app is ad-hoc signed, not notarized
 open "$DEST"
 say "Sideframe is installed and running (look for its icon in the menu bar)."

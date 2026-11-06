@@ -25,6 +25,9 @@ echo "built $APP"
 if [ "${INSTALL:-1}" = 1 ]; then
     mkdir -p "$HOME/Applications"
     rm -rf "$HOME/Applications/Sideframe.app"; cp -R "$APP" "$HOME/Applications/Sideframe.app"
+    # a new ad-hoc build is a "different app" to macOS: clear the stale permission entries so it asks fresh (toggling the old ones does nothing)
+    tccutil reset ScreenCapture org.sideframe.Sideframe >/dev/null 2>&1 || true
+    tccutil reset Accessibility org.sideframe.Sideframe >/dev/null 2>&1 || true
     echo "installed: $HOME/Applications/Sideframe.app"
 fi
 codesign -dv "$APP" 2>&1 | grep -E "Identifier|Signature|CDHash" || true
