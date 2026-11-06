@@ -78,6 +78,13 @@ Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh
 * The keyboard button under the tab opens the SteamVR keyboard. A physical or Bluetooth keyboard types into the Mac while the laser is on the tab.
 * `sideframe --help`-style options: `--scale F` (force a fixed fraction of the Mac's resolution), `--max-fps N`, `--idle-exit SECONDS`.
 
+## Settings
+
+On the Frame's home screen, **Settings**:
+* **Picture — Sharp or Efficient.** Efficient sends a slightly smaller picture with fewer updates per second and asks the Mac for less video data: cooler and quieter.
+* **Start with SteamVR** (off by default). Installs a small user service so the tab is always in the dashboard; turning it off removes it.
+* **Temperature protection.** Above 85 °C Sideframe eases off by itself (fewer updates, less video data) and returns to normal below 80 °C.
+
 ## Updates
 
 The Frame's home screen shows its version and has a **Check for updates** button. It makes one small request (a text file in this repository,

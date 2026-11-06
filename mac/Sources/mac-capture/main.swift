@@ -1,5 +1,5 @@
 // mac-capture — command-line companion of the Sideframe Mac app (development / headless use / tests).
-//   mac-capture serve  [--port 5000] [--mbps 20] [--fps 60] [--seconds N] [--no-capture]   wait for a paired Frame, then stream
+//   mac-capture serve  [--port 5000] [--mbps N (default: automatic from the display size)] [--fps 60] [--seconds N] [--no-capture]   wait for a paired Frame, then stream
 //   mac-capture pair   [--port 5000]                                         start pairing: prints a code, waits for the Frame
 //   mac-capture list                                                         list paired Frames
 //   mac-capture record <out.h265> [seconds] [fps] [mbps]                     capture to a file (no network)
@@ -75,7 +75,7 @@ case "record":
     RunLoop.main.run()
 
 case "serve":
-    let port = UInt16(opt("--port", 5000)), mbps = opt("--mbps", 20), fps = opt("--fps", 60), secs = opt("--seconds", 0)
+    let port = UInt16(opt("--port", 5000)), mbps = opt("--mbps", 0), fps = opt("--fps", 60), secs = opt("--seconds", 0)
     if !CommandLine.arguments.contains("--no-capture") { requireScreenAccess() }
     if KeyStore.shared.all.isEmpty { print("No Frame is paired yet. Run `mac-capture pair` (or use the Sideframe app) and enter the code on your Steam Frame.") }
     Server.shared.onSessionStart = { resetSessionState() }

@@ -50,11 +50,13 @@ static VROverlayHandle_t ov_main, ov_thumb;
 #include "kbd.h"
 static bool kb_focus = false; static double kb_focus_t;   /* the laser is on the tab (with a short grace): physical keyboards type into the Mac */
 static bool tab_visible = true;           /* refreshed from IsOverlayVisible() */
-static double vr_ptr_t, vis_check_t, last_video_t, last_card_t, last_pause_t, vr_ev_t, hidden_since, vr_last_push;
+static double q_sent_t, vr_ptr_t, vis_check_t, last_video_t, last_card_t, last_pause_t, vr_ev_t, hidden_since, vr_last_push;
 static int vr_held = -1;                        /* newest decoded frame that has not been shown yet (decoder buffer index) */
-static double vr_min_interval = 1.0 / 30;       /* cap on overlay updates (--max-fps N); each update makes SteamVR copy a ~20 MB image */
+static double vr_min_interval = 0;              /* --max-fps N: an extra cap on overlay updates (0 = none). The real pace comes from Settings and the temperature: eff_min_interval() */
+static double vr_interval(void) { double e = eff_min_interval(); return vr_min_interval > e ? vr_min_interval : e; }   /* each update makes SteamVR copy a large image */
 static double vr_out_scale = 0;                 /* --scale F (0.25...1) forces a fixed fraction of the Mac display; 0 (default) = automatic: sized from the headset, see vr_auto_cap_w */
-static int vr_auto_cap_w = 2560;                /* widest texture worth sending: ~1.2x the headset's per-eye render width (read from SteamVR in vr_init) */
+static int vr_render_w = 2160;                  /* the headset's recommended per-eye render width (read from SteamVR in vr_init) */
+static int vr_auto_cap_w(void) { return (int)(vr_render_w * eff_size_factor()) & ~1; }   /* widest texture worth sending; depends on Settings */                /* widest texture worth sending: ~1.2x the headset's per-eye render width (read from SteamVR in vr_init) */
 static double vr_idle_exit_s = 0;               /* --idle-exit SECONDS: quit after the tab has been hidden this long (0 = never) */
 static void udp_msg(uint8_t type, uint32_t seq, uint32_t val, const uint16_t *idx, int n);   /* defined in viewer.c */
 static void udp_text(const char *utf8, int n);   /* defined in viewer.c */
@@ -304,7 +306,7 @@ static VkShaderModule shader(const uint32_t *code, size_t bytes) {
 static void vr_setup_output(int srcw, int srch) {
     /* Automatic sizing: the tab has a fixed physical width, so the headset can only show about vr_auto_cap_w pixels across it, whatever
      * the Mac display is. Never upscale; keep the Mac's aspect ratio (works for 16:9, 16:10, ultrawide, 5K, ...). */
-    double sc = vr_out_scale > 0 ? vr_out_scale : (srcw > vr_auto_cap_w ? (double)vr_auto_cap_w / srcw : 1.0);
+    double sc = vr_out_scale > 0 ? vr_out_scale : (srcw > vr_auto_cap_w() ? (double)vr_auto_cap_w() / srcw : 1.0);
     int w = (int)(srcw * sc + 0.5) & ~1, h = (int)(srch * sc + 0.5) & ~1;   /* even sizes */
     if (sc < 0.999) fprintf(stderr, "efficient mode: SteamVR texture %dx%d (%.0f%% of the Mac display)\n", w, h, sc * 100);
     vid_w = w; vid_h = h; tb_h = 0;   /* the stream is the Mac screen and nothing else: no toolbar strip */
@@ -477,13 +479,13 @@ static int vr_service(void) {
     if (vr_held < 0) return -1;
     double t = now();
     if (!tab_visible && !vr_force_visible) { int g = vr_held; vr_held = -1; vr_skipped_hidden++; return g; }
-    if (t - vr_last_push < vr_min_interval) return -1;
+    if (t - vr_last_push < vr_interval()) return -1;
     int g = vr_held; vr_held = -1;
     vr_present(g); vr_last_push = t;
     return g;
 }
 /* milliseconds until the held frame is due (a long time if nothing is held), so the main loop can sleep exactly that long */
-static int vr_due_ms(void) { if (vr_held < 0) return 1000; double d = vr_last_push + vr_min_interval - now(); return d <= 0 ? 0 : (int)(d * 1000) + 1; }
+static int vr_due_ms(void) { if (vr_held < 0) return 1000; double d = vr_last_push + vr_interval() - now(); return d <= 0 ? 0 : (int)(d * 1000) + 1; }
 
 /* ------------------------------------------------------------------ tear down a stream (back to the menu) */
 /* Destroys everything that belongs to one stream: the imported decoder buffers, the video texture and the conversion pipeline.
@@ -557,6 +559,8 @@ static void vr_poll(void) {
     }
     /* physical keyboards: only while streaming, the tab visible, and the laser on it (1.5 s grace after it leaves) */
     kbd_service(t, vr_view == VIEW_STREAM && tab_visible && (kb_focus || t - kb_focus_t < 1.5), kb_send);
+    if (therm_poll(t)) { fprintf(stderr, "temperature %d C: %s\n", therm_temp_c, therm_level == 0 ? "back to normal" : therm_level == 1 ? "easing off (warm)" : "easing off a lot (hot)"); menu_need = true; }
+    if (vr_view == VIEW_STREAM && t - q_sent_t >= 2.0) { q_sent_t = t; udp_msg(12, (uint32_t)eff_mac_fps(), (uint32_t)eff_mac_bitrate_pct(), NULL, 0); }   /* tell the Mac how much to send (idempotent re-send) */
     if (!tab_visible && !vr_force_visible && t - last_pause_t >= 1.0) { udp_msg(11, 1, 0, NULL, 0); last_pause_t = t; }   /* idempotent re-send: survives reconnects and lost packets */
     if (tab_visible || vr_force_visible) hidden_since = 0;
     else if (!hidden_since) hidden_since = t;
@@ -607,8 +611,8 @@ static void vr_init(void) {
     {   /* how many pixels can this headset actually show? SteamVR's recommended per-eye render width, with 1.2x headroom for the tab's tilt */
         struct VR_IVRSystem_FnTable *vsys = vr_iface(IVRSystem_Version); uint32_t rw = 0, rh = 0;
         if (vsys && vsys->GetRecommendedRenderTargetSize) vsys->GetRecommendedRenderTargetSize(&rw, &rh);
-        if (rw >= 1000 && rw <= 8000) vr_auto_cap_w = (int)(rw * 1.2) & ~1;
-        fprintf(stderr, "headset render width %u -> the tab texture is capped at %d px wide\n", rw, vr_auto_cap_w);
+        if (rw >= 1000 && rw <= 8000) vr_render_w = (int)rw;
+        fprintf(stderr, "headset render width %u -> the tab texture is capped at %d px wide\n", rw, vr_auto_cap_w());
     }
 
     char icon[PATH_MAX]; snprintf(icon, sizeof icon, "%s/.local/share/icons/hicolor/256x256/apps/sideframe.png", getenv("HOME") ? getenv("HOME") : "");
@@ -639,7 +643,7 @@ static void vr_init(void) {
         if (n > 0) { char *sl = strrchr(exe, '/'); if (sl) *sl = 0; snprintf(fdir, sizeof fdir, "%s/assets/fonts", exe); } else fdir[0] = 0;
         ui_load_fonts(fdir);
     }
-    menu_init(); disc_open();
+    settings_load(); menu_init(); disc_open();
     menu_present(now());
     fprintf(stderr, "dashboard tab \"Sideframe\" is ready\n");
 }

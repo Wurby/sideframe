@@ -60,7 +60,10 @@ Receivers keep a 2048-packet replay window and only update it after authenticati
 
 Frame→Mac control: `[type u8][flags u8][n u16][a u32][b u32]` (+ n bytes payload)
 1 ack (a = highest consumed frame, b = µs from receipt to presentation or 0xFFFFFFFF) · 2 NACK (a = frame, n fragment indices; n=0xFFFF = whole frame) ·
-3 keyframe request · 4 ping (echoed) · 5–10 input (section 7).
+3 keyframe request · 4 ping (echoed) · 5–10 input (section 7) · 11 pause/resume (a ≠ 0: the Frame's tab is hidden, stop sending) ·
+12 quality (a = frame-rate ceiling, 0 = none; b = percent of the Mac's automatic bitrate, 25…100; re-sent every ~2 s while streaming, unknown to older Macs and ignored by them) · 13 bye.
+
+The Mac chooses its own bitrate from the size of the mirrored display (about 5 Mbps per megapixel, 8…50 Mbps) and re-sends the last picture twice after the screen has been still for ~0.35 s so static text sharpens.
 
 ## 6. Video
 

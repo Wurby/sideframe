@@ -25,7 +25,7 @@ actor CaptureController {
         while (stream != nil) != wanted {
             if wanted {
                 do {
-                    let (s, c) = try await startCapture(fps: 60, mbps: 20)
+                    let (s, c) = try await startCapture(fps: 60)
                     stream = s; cap = c
                 } catch {
                     print("capture failed to start: \(error)")

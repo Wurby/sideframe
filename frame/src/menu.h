@@ -6,6 +6,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include "ui.h"
+#include "settings.h"
 #include "discovery.h"
 #include "pairing_client.h"
 
@@ -19,7 +20,7 @@
 #define MENU_HEIGHT 720
 #define MAX_MACS 8
 
-enum scr { SCR_HOME, SCR_ADD_PICK, SCR_ADD_CODE, SCR_PAIRING, SCR_CONNECTING, SCR_CLOSING };
+enum scr { SCR_HOME, SCR_ADD_PICK, SCR_ADD_CODE, SCR_PAIRING, SCR_CONNECTING, SCR_CLOSING, SCR_SETTINGS };
 enum act { ACT_NONE, ACT_CONNECT, ACT_QUIT, ACT_CANCEL_CONNECT };
 
 struct pair_job { char host[96]; int port; char code[16]; char name[96]; volatile int state; /* 0 idle 1 running 2 ok 3 failed */ struct mac_conf result; char err[256]; pthread_t th; };
@@ -40,6 +41,7 @@ static struct menu {
     double t_draw;
     /* health (checked every few seconds) and the manual update check */
     bool net_ok, dec_ok; double health_t;
+    char set_err[200];
     int upd_state; char upd_ver[40];          /* 0 idle, 1 checking, 2 up to date, 3 newer version exists, 4 couldn't check */
 } M;
 static void menu_health(double t);
@@ -86,6 +88,7 @@ static bool menu_tick(double t) {
     bool d = M.dirty; M.dirty = false;
     if (disc_poll()) d = true;
     menu_health(t);
+    { static double lt; if (M.scr == SCR_SETTINGS && therm_t != lt) { lt = therm_t; d = true; } }
     if (M.banner[0] && t > M.banner_until) { M.banner[0] = 0; d = true; }
     if (M.forget_armed >= 0 && t - M.forget_t > 3.5) { M.forget_armed = -1; d = true; }
     if (M.scr == SCR_PAIRING) {
@@ -153,19 +156,6 @@ static void menu_check_update(void) {
     M.upd_state = 1; pthread_t th; if (pthread_create(&th, NULL, update_thread, NULL) == 0) pthread_detach(th); else M.upd_state = 4;
     M.dirty = true;
 }
-static void draw_footer(float x) {                              /* version + update line, bottom centre of Home */
-    char b[160]; uint32_t c = C_TEXT_FAINT;
-    if (!SIDEFRAME_UPDATE_URL[0]) { snprintf(b, sizeof b, "Sideframe %s", SIDEFRAME_VERSION); }
-    else switch (M.upd_state) {
-        case 1: snprintf(b, sizeof b, "Sideframe %s  ·  checking for updates…", SIDEFRAME_VERSION); break;
-        case 2: snprintf(b, sizeof b, "Sideframe %s  ·  up to date", SIDEFRAME_VERSION); c = C_GREEN; break;
-        case 3: snprintf(b, sizeof b, "Sideframe %s  ·  version %s is available (see the project page)", SIDEFRAME_VERSION, M.upd_ver); c = C_AMBER; break;
-        case 4: snprintf(b, sizeof b, "Sideframe %s  ·  couldn’t check for updates (no internet?)", SIDEFRAME_VERSION); break;
-        default: snprintf(b, sizeof b, "Sideframe %s", SIDEFRAME_VERSION);
-    }
-    ui_text(x, 650, b, 22, false, c);
-    if (SIDEFRAME_UPDATE_URL[0] && M.upd_state != 1) { float w = ui_text_w(b, 22, false); if (x + w + 24 + 220 < MENU_WIDTH - 56 - 300 - 16 && ui_button(x + w + 24, 636, 220, 48, "Check for updates", 3, true, 20)) menu_check_update(); }
-}
 
 static void draw_banner(void) {
     const char *msg = M.banner[0] ? M.banner : health_problem(); uint32_t col = M.banner[0] ? M.banner_color : C_AMBER;
@@ -194,7 +184,7 @@ static void screen_home(double t) {
         ui_paragraph(100, 288, 1500, "Install Sideframe on your Mac first if you haven’t (download it from the Sideframe project page).\n1.  On your Mac, click the Sideframe icon in the menu bar and choose “Pair a Steam Frame…”.\n2.  Come back here, tap Add a Mac, pick your Mac and type the code it shows.", 28, false, C_TEXT_DIM);
         if (ui_button(100, 440, 340, 72, "Add a Mac", 0, true, 30)) menu_goto(SCR_ADD_PICK);
         if (ui_button(MENU_WIDTH - 56 - 240, 628, 240, 60, "Close Sideframe", 3, true, 26)) M.action = ACT_QUIT;
-        draw_footer(56);
+        if (ui_button(56, 628, 240, 60, "Settings", 3, true, 26)) menu_goto(SCR_SETTINGS);
         return;
     }
     ui_text(56, 168, "YOUR MACS", 20, true, C_TEXT_FAINT);
@@ -230,7 +220,7 @@ static void screen_home(double t) {
     if (M.nmacs > 3) { char b[64]; snprintf(b, sizeof b, "…and %d more", M.nmacs - 3); ui_text(56, 590, b, 22, false, C_TEXT_FAINT); }
     if (ui_button(56, 632, 280, 60, "Add a Mac", 1, true, 26)) menu_goto(SCR_ADD_PICK);
     if (ui_button(MENU_WIDTH - 56 - 300, 632, 300, 60, "Close Sideframe", 3, true, 26)) M.action = ACT_QUIT;
-    draw_footer(360);
+    if (ui_button(356, 632, 240, 60, "Settings", 1, true, 26)) menu_goto(SCR_SETTINGS);
 }
 
 static void screen_add_pick(double t) {
@@ -351,9 +341,46 @@ static void toolbar_paint(int w, int tb, int hover, const char *mac_name) {
 }
 
 /* Draw the current screen into UI.px. */
+static void screen_settings(double t) {
+    if (ui_button(40, 36, 150, 56, "‹  Back", 3, true, 26)) { menu_goto(SCR_HOME); return; }
+    ui_text(56, 110, "Settings", 54, true, C_TEXT);
+    /* picture quality */
+    ui_text(56, 200, "PICTURE", 20, true, C_TEXT_FAINT);
+    if (ui_button(56, 232, 230, 64, "Sharp", ST.quality == Q_SHARP ? 0 : 1, true, 28)) { ST.quality = Q_SHARP; settings_save(); M.dirty = true; }
+    if (ui_button(300, 232, 230, 64, "Efficient", ST.quality == Q_EFFICIENT ? 0 : 1, true, 28)) { ST.quality = Q_EFFICIENT; settings_save(); M.dirty = true; }
+    ui_paragraph(560, 236, 1100, ST.quality == Q_SHARP ? "Sharpest picture and smoothest motion. Uses more power and runs warmer."
+                                                        : "A slightly smaller picture and fewer updates per second. Cooler and quieter on the Frame.", 24, false, C_TEXT_DIM);
+    ui_text(56, 306, "Takes effect the next time you connect. The picture size always follows your headset and your Mac’s display.", 20, false, C_TEXT_FAINT);
+    /* start with SteamVR */
+    ui_text(56, 372, "STARTUP", 20, true, C_TEXT_FAINT);
+    if (ui_button(56, 404, 230, 64, "Off", !ST.autostart ? 0 : 1, true, 28)) { if (ST.autostart) { M.set_err[0] = 0; settings_set_autostart(false, M.set_err, sizeof M.set_err); M.dirty = true; } }
+    if (ui_button(300, 404, 230, 64, "On", ST.autostart ? 0 : 1, true, 28)) { if (!ST.autostart) { M.set_err[0] = 0; settings_set_autostart(true, M.set_err, sizeof M.set_err); M.dirty = true; } }
+    ui_paragraph(560, 408, 1100, "Start Sideframe together with SteamVR, so its tab is always in the dashboard. Off by default; turning it off removes it again.", 24, false, C_TEXT_DIM);
+    if (M.set_err[0]) ui_text(56, 480, M.set_err, 22, false, C_RED);
+    /* about + updates + temperature */
+    ui_rrect(56, 520, 1608, 150, 24, C_CARD); ui_rrect_line(56, 520, 1608, 150, 24, 2, C_LINE);
+    char b[160]; uint32_t c = C_TEXT_DIM;
+    ui_text(88, 544, "Sideframe", 28, true, C_TEXT); ui_text(88 + ui_text_w("Sideframe", 28, true) + 14, 548, SIDEFRAME_VERSION, 24, false, C_TEXT_DIM);
+    if (!SIDEFRAME_UPDATE_URL[0]) b[0] = 0;
+    else switch (M.upd_state) {
+        case 1: snprintf(b, sizeof b, "Checking for updates…"); break;
+        case 2: snprintf(b, sizeof b, "You have the latest version."); c = C_GREEN; break;
+        case 3: snprintf(b, sizeof b, "Version %s is available — download it from %s", M.upd_ver, SIDEFRAME_URL[0] ? SIDEFRAME_URL : "the project page"); c = C_AMBER; break;
+        case 4: snprintf(b, sizeof b, "Couldn’t check for updates (no internet?)."); break;
+        default: snprintf(b, sizeof b, "Updates are only checked when you press the button."); c = C_TEXT_FAINT;
+    }
+    if (b[0]) ui_text(88, 592, b, 22, false, c);
+    if (SIDEFRAME_UPDATE_URL[0] && M.upd_state != 1 && ui_button(88, 620, 260, 40, "Check for updates", 1, true, 20)) menu_check_update();
+    char tb[120]; if (therm_temp_c > 0) snprintf(tb, sizeof tb, "Frame temperature %d°C  ·  %s", therm_temp_c, therm_level == 0 ? "running normally" : therm_level == 1 ? "warm: easing off to cool down" : "hot: easing off a lot");
+    else snprintf(tb, sizeof tb, "Frame temperature unavailable");
+    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w(tb, 22, false), 548, tb, 22, false, therm_level ? C_AMBER : C_TEXT_DIM);
+    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w("Sideframe eases off by itself above 85°C to protect the headset.", 20, false), 592, "Sideframe eases off by itself above 85°C to protect the headset.", 20, false, C_TEXT_FAINT);
+}
+
 static void menu_draw(double t) {
     ui_clear_gradient(C_BG_TOP, C_BG_BOTTOM);
     switch (M.scr) {
+    case SCR_SETTINGS: screen_settings(t); break;
     case SCR_HOME: screen_home(t); break;
     case SCR_ADD_PICK: screen_add_pick(t); break;
     case SCR_ADD_CODE: screen_add_code(t); break;

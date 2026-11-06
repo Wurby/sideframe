@@ -32,6 +32,12 @@ final class Encoder {
         if useLimit { set(kVTCompressionPropertyKey_DataRateLimits, [Int(Double(bitrate) * 1.5 / 8), 1] as CFArray) }
         VTCompressionSessionPrepareToEncodeFrames(s)
     }
+    /// Change the target bitrate while running (the Frame asked for less/more, e.g. because it is getting hot).
+    func setBitrate(_ bitrate: Int) {
+        guard let s = session else { return }
+        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFTypeRef)
+        if useLimit { VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits, value: [Int(Double(bitrate) * 1.5 / 8), 1] as CFArray) }
+    }
     func encode(_ pb: CVPixelBuffer, pts: CMTime, tCb: UInt64, capLagUs: Double) {
         let seq = nextSeq; nextSeq &+= 1
         statsLock.lock(); outstanding += 1
@@ -101,6 +107,21 @@ final class Capture: NSObject, SCStreamOutput {
     // picture anyway, so the last captured frame is kept and re-encoded on demand.
     private let lastLock = NSLock()
     private var keepaliveOn = true
+    private var sharpenedStamp: UInt64 = 0, sharpenCount = 0
+    // quality requested by the Frame (Stats: wantFps / wantPct) applied to the running capture
+    var stream: SCStream?; var cfg: SCStreamConfiguration?
+    var baseFps = 60, baseBitrate = 20_000_000
+    private var appliedFps = 0, appliedPct = 100
+    func applyWantedQuality() {
+        statsLock.lock(); let wf = wantFps, wp = wantPct; statsLock.unlock()
+        let fps = wf > 0 ? min(wf, baseFps) : baseFps
+        if fps != appliedFps, let cfg, let stream {
+            appliedFps = fps; cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+            stream.updateConfiguration(cfg) { _ in }
+            print("capture rate set to \(fps) fps (the Frame asked for \(wf == 0 ? "no limit" : "\(wf)"))")
+        }
+        if wp != appliedPct { appliedPct = wp; enc.setBitrate(baseBitrate * wp / 100); print("bitrate set to \(baseBitrate * wp / 100 / 1_000_000) Mbps (\(wp)%)") }
+    }
     private var lastPB: CVPixelBuffer?
     private var lastEncodeNs: UInt64 = 0
     func startKeepalive() {
@@ -108,8 +129,20 @@ final class Capture: NSObject, SCStreamOutput {
             while keepaliveOn {
                 usleep(100_000)
                 guard Server.shared.serving, Server.shared.hasSession, !Server.shared.paused else { continue }
-                lastLock.lock(); let pb = lastPB; let idle = nowNs() &- lastEncodeNs; lastLock.unlock()
+                applyWantedQuality()
+                lastLock.lock(); let pb = lastPB; let idle = nowNs() &- lastEncodeNs; let stamp = lastEncodeNs; lastLock.unlock()
                 guard let pb else { continue }
+                // Sharpen once when the picture settles: the last frame of a change was encoded in a hurry (moving content gets few bits), so after
+                // ~0.35 s of stillness send that same frame again, twice, at leisure. Then stay silent: a still desktop costs nothing.
+                if stamp != sharpenedStamp && idle > 350_000_000 {
+                    statsLock.lock(); let busy = outstanding >= maxInflight; statsLock.unlock()
+                    if !busy {
+                        if sharpenCount == 0 { sharpenCount = 2 }
+                        enc.encode(pb, pts: CMClockGetTime(CMClockGetHostTimeClock()), tCb: nowNs(), capLagUs: 0)
+                        sharpenCount -= 1
+                        if sharpenCount == 0 { sharpenedStamp = stamp } else { usleep(120_000) }
+                    }
+                }
                 statsLock.lock(); let fk = forceKey, full = outstanding >= maxInflight; statsLock.unlock()
                 if full { continue }
                 // Only when a fresh picture is needed (new session, resume after pause, keyframe request). NOT periodically:
@@ -145,12 +178,16 @@ final class Capture: NSObject, SCStreamOutput {
 }
 
 /// Starts mirroring the main display at its native pixel size. Returns the running stream + capture objects.
-func startCapture(fps: Int, mbps: Int) async throws -> (SCStream, Capture) {
+/// Automatic bitrate for a display: about 5 Mbps per megapixel (3440x1440 ~ 25 Mbps, 1080p ~ 10), between 8 and 50 Mbps.
+func autoMbps(width: Int, height: Int) -> Int { min(50, max(8, Int((Double(width * height) / 1_000_000 * 5).rounded()))) }
+
+func startCapture(fps: Int, mbps requested: Int = 0) async throws -> (SCStream, Capture) {
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     guard let disp = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
     else { throw NSError(domain: "capture", code: 1, userInfo: [NSLocalizedDescriptionKey: "no display"]) }
     let mode = CGDisplayCopyDisplayMode(disp.displayID)
     let w = mode?.pixelWidth ?? disp.width, h = mode?.pixelHeight ?? disp.height
+    let mbps = requested > 0 ? requested : autoMbps(width: w, height: h)   // 0 = automatic, from this display's size
     print("mirroring display \(disp.displayID): \(w)x\(h) px @\(fps)fps, \(mbps) Mbps HEVC, LL=\(useLL), keyframe \(keySec)s, burst-cap=\(useLimit), window=\(maxInflight)")
     let cfg = SCStreamConfiguration()
     cfg.width = w; cfg.height = h
@@ -161,6 +198,7 @@ func startCapture(fps: Int, mbps: Int) async throws -> (SCStream, Capture) {
     cap.enc = try Encoder(width: w, height: h, fps: fps, bitrate: mbps * 1_000_000)
     let stream = SCStream(filter: SCContentFilter(display: disp, excludingWindows: []), configuration: cfg, delegate: nil)
     try stream.addStreamOutput(cap, type: .screen, sampleHandlerQueue: DispatchQueue(label: "cap"))
+    cap.stream = stream; cap.cfg = cfg; cap.baseFps = fps; cap.baseBitrate = mbps * 1_000_000
     cap.startKeepalive()
     try await stream.startCapture()
     return (stream, cap)
