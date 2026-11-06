@@ -20,10 +20,10 @@ int main(int argc, char **argv) {
     if (!ui_load_fonts("../assets/fonts")) return 1;
     memset(&M, 0, sizeof M); M.forget_armed = -1;
     struct disc_mac *d = &disc_macs[0]; memset(d, 0, sizeof *d); d->used = true; d->port = 5000; d->seen = disc_now();
-    snprintf(d->name, sizeof d->name, "Alex’s MacBook Air"); snprintf(d->id, sizeof d->id, "457ac4cc5d950565"); snprintf(d->ip, sizeof d->ip, "192.168.0.109"); snprintf(d->host, sizeof d->host, "Alexs-MacBook-Air.local");
+    snprintf(d->name, sizeof d->name, "Alex’s MacBook Air"); snprintf(d->id, sizeof d->id, "0123456789abcdef"); snprintf(d->ip, sizeof d->ip, "192.168.1.20"); snprintf(d->host, sizeof d->host, "Alexs-MacBook-Air.local");
     UI.have_mouse = true; UI.mx = 1250; UI.my = 250;       /* pretend the pointer is over the first card's Connect button */
 
-    fake_mac(0, "Alex’s MacBook Air", "457ac4cc5d950565"); M.nmacs = 1;
+    fake_mac(0, "Alex’s MacBook Air", "0123456789abcdef"); M.nmacs = 1;
     M.scr = SCR_HOME; menu_draw(0); dump(dir, "1_home_online");
 
     snprintf(M.banner, sizeof M.banner, "Paired with “Alex’s MacBook Air”. Tap Connect to start."); M.banner_color = C_GREEN; M.banner_until = 1e9;
