@@ -382,7 +382,7 @@ static void screen_settings(double t) {
     char tb[120]; if (therm_temp_c > 0) snprintf(tb, sizeof tb, "Frame temperature %d°C  ·  %s", therm_temp_c, therm_level == 0 ? "running normally" : therm_level == 1 ? "warm: easing off to cool down" : "hot: easing off a lot");
     else snprintf(tb, sizeof tb, "Frame temperature unavailable");
     ui_text(MENU_WIDTH - 56 - 32 - ui_text_w(tb, 22, false), 580, tb, 22, false, therm_level ? C_AMBER : C_TEXT_DIM);
-    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w("Sideframe eases off by itself above 85°C to protect the headset.", 20, false), 618, "Sideframe eases off by itself above 85°C to protect the headset.", 20, false, C_TEXT_FAINT);
+    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w("Sideframe eases off by itself above 88°C to protect the headset.", 20, false), 618, "Sideframe eases off by itself above 88°C to protect the headset.", 20, false, C_TEXT_FAINT);
 }
 
 static void menu_draw(double t) {

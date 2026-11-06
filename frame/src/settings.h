@@ -60,7 +60,7 @@ static bool settings_set_autostart(bool on, char *err, size_t en) {
 
 /* ---------------------------------------------------------------- thermal governor */
 static int therm_temp_c = 0;       /* hottest sensor, °C (0 = unknown) */
-static int therm_level = 0;        /* 0 normal, 1 warm (>=85 °C: ease off), 2 hot (>=90 °C: ease off a lot) */
+static int therm_level = 0;        /* 0 normal, 1 warm (ease off), 2 hot (ease off a lot) */
 static double therm_t = -100;
 static int therm_read(void) {
     int best = 0; DIR *d = opendir("/sys/class/thermal"); if (!d) return 0; struct dirent *e;
@@ -71,14 +71,20 @@ static int therm_read(void) {
     }
     closedir(d); return best;
 }
-/* call often (cheap: reads sysfs every 5 s). Returns true if the level changed. */
+/* call often (cheap: reads sysfs every 5 s). Returns true if the level changed.
+ * Thresholds (hottest sensor): SteamVR alone keeps the Frame at 70-85 C under load and the kernel's own limits are 110 C (hot) / 115 C (critical),
+ * so we only ease off when it is clearly running hotter than normal: warm at 88 C, hot at 93 C, with generous hysteresis so we don't flap. */
+#define THERM_WARM 88
+#define THERM_HOT 93
+#define THERM_WARM_CLEAR 84
+#define THERM_HOT_CLEAR 90
 static bool therm_poll(double t) {
     if (t - therm_t < 5.0) return false; therm_t = t;
     therm_temp_c = therm_read(); int old = therm_level, c = therm_temp_c;
-    if (c >= 90) therm_level = 2;
-    else if (c >= 85) { if (therm_level < 1) therm_level = 1; else if (therm_level == 2 && c <= 86) therm_level = 1; }
-    else if (c <= 80) therm_level = 0;
-    else if (therm_level == 2) therm_level = 1;                 /* between 80 and 85: step down one level, then hold */
+    if (c >= THERM_HOT) therm_level = 2;
+    else if (therm_level == 2) { if (c <= THERM_HOT_CLEAR) therm_level = c >= THERM_WARM_CLEAR ? 1 : 0; }
+    else if (c >= THERM_WARM) therm_level = 1;
+    else if (therm_level == 1 && c <= THERM_WARM_CLEAR) therm_level = 0;
     return therm_level != old;
 }
 
