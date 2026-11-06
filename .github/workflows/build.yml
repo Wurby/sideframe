@@ -34,10 +34,6 @@ jobs:
         run: STATIC_SODIUM=1 ./scripts/package-frame.sh
       - uses: actions/upload-artifact@v4
         with: { name: sideframe-frame, path: dist/sideframe-frame-* }
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with: { files: 'dist/sideframe-frame-*' }
 
   mac:
     runs-on: macos-latest
@@ -46,7 +42,23 @@ jobs:
       - run: ./scripts/package-mac.sh
       - uses: actions/upload-artifact@v4
         with: { name: sideframe-mac, path: dist/sideframe-mac-* }
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
+
+  release:
+    # On a version tag: publish one GitHub release with both downloads.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [frame, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
-        with: { files: 'dist/sideframe-mac-*' }
+        with:
+          generate_release_notes: true
+          files: |
+            dist/sideframe-frame-*.tar.gz
+            dist/sideframe-frame-*.sha256
+            dist/sideframe-mac-*.zip
+            dist/sideframe-mac-*.sha256
