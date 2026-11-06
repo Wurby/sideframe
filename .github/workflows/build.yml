@@ -15,7 +15,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config glslc libsodium-dev libfreetype-dev libvulkan-dev libwayland-dev
+          sudo apt-get install -y build-essential pkg-config glslc libsodium-dev libfreetype-dev libvulkan-dev libwayland-dev libdrm-dev
       - name: Build (libsodium linked statically so SteamOS's libsodium version doesn't matter)
         run: make -C frame STATIC_SODIUM=1
       - name: Check what the programs depend on
@@ -40,7 +40,7 @@ jobs:
         with: { files: 'dist/sideframe-frame-*' }
 
   mac:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/package-mac.sh

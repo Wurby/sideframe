@@ -9,7 +9,7 @@ PREFIX ?= $(HOME)/.local
 # ffmpeg is OPTIONAL (only to play a raw .h265 test file): make HAVE_FFMPEG=1. Without it the programs link no ffmpeg, so SteamOS ffmpeg updates cannot break them.
 FFMPEG_PKGS = $(if $(HAVE_FFMPEG),libavformat libavcodec libavutil,)
 FFMPEG_DEF = $(if $(HAVE_FFMPEG),-DHAVE_FFMPEG,)
-COMMON = -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-missing-braces $(FFMPEG_DEF) -I/usr/include/libdrm $(shell pkg-config --cflags $(FFMPEG_PKGS) libsodium)
+COMMON = -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-missing-braces $(FFMPEG_DEF) -I/usr/include/libdrm $(shell pkg-config --cflags $(FFMPEG_PKGS) libsodium libdrm)
 # STATIC_SODIUM=1 links libsodium statically (used for the release build so it doesn't depend on the system's libsodium version)
 SODIUM_STATIC := -Wl,-Bstatic -lsodium -Wl,-Bdynamic
 SODIUM_LIBS = $(if $(STATIC_SODIUM),$(SODIUM_STATIC),$(shell pkg-config --libs libsodium))
@@ -23,7 +23,7 @@ SIDEFRAME_UPDATE_URL ?=
 SIDEFRAME_URL ?=
 # vendored header (BSD-3, see third_party/openvr/LICENSE); the library itself is loaded at run time
 OPENVR_INC ?= third_party/openvr
-VR_LIBS = $(shell pkg-config --libs $(FFMPEG_PKGS)) $(SODIUM_LIBS) -lvulkan -ldl -lm
+VR_LIBS = $(if $(FFMPEG_PKGS),$(shell pkg-config --libs $(FFMPEG_PKGS)),) $(SODIUM_LIBS) -lvulkan -ldl -lm
 
 all: sideframe sideframe-window
 
