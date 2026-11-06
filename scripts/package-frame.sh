@@ -2,7 +2,7 @@
 # Builds the Frame release download:  dist/sideframe-frame-VERSION-aarch64.tar.gz  (run this ON a Steam Frame)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); V=$(cat "$ROOT/VERSION")
-[ "$(uname -m)" = aarch64 ] || { echo "Build the Frame release on a Steam Frame (aarch64)."; exit 1; }
+[ "$(uname -m)" = aarch64 ] || { echo "Build the Frame release on an aarch64 machine (a Steam Frame, or GitHub's arm64 runner)."; exit 1; }
 (cd "$ROOT/frame" && env -u LD_LIBRARY_PATH make -B all)
 OUT="$ROOT/dist"; STAGE="$OUT/sideframe-frame-$V"; rm -rf "$STAGE"; mkdir -p "$STAGE/assets/fonts"
 cd "$ROOT/frame"

@@ -1,0 +1,52 @@
+name: build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  frame:
+    # GitHub's free arm64 machines: the Steam Frame is aarch64 Linux.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config glslc libsodium-dev libfreetype-dev libvulkan-dev libwayland-dev
+      - name: Build (libsodium linked statically so SteamOS's libsodium version doesn't matter)
+        run: make -C frame STATIC_SODIUM=1
+      - name: Check what the programs depend on
+        run: |
+          set -e
+          cd frame
+          for f in sideframe sideframe-window; do
+            echo "== $f needs:"; readelf -d "$f" | awk '/NEEDED/{gsub(/[\[\]]/,"",$5); print "  " $5}'
+          done
+          # Only libraries every SteamOS install has. Anything else (ffmpeg, libsodium, libopenvr_api...) would break on some Frames.
+          bad=$(for f in sideframe sideframe-window; do readelf -d "$f" | awk '/NEEDED/{gsub(/[\[\]]/,"",$5); print $5}'; done | sort -u |
+                grep -v -E '^(libc\.so\.6|libm\.so\.6|libdl\.so\.2|libpthread\.so\.0|libfreetype\.so\.6|libvulkan\.so\.1|libwayland-client\.so\.0)$' || true)
+          if [ -n "$bad" ]; then echo "Unexpected dependencies:"; echo "$bad"; exit 1; fi
+          ./sideframe --selftest | tail -2
+      - name: Package
+        run: STATIC_SODIUM=1 ./scripts/package-frame.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: sideframe-frame, path: dist/sideframe-frame-* }
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with: { files: 'dist/sideframe-frame-*' }
+
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/package-mac.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: sideframe-mac, path: dist/sideframe-mac-* }
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with: { files: 'dist/sideframe-mac-*' }

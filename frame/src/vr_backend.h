@@ -12,12 +12,25 @@
 #include "openvr_capi.h"
 #include "menu.h"
 
-/* The C header keeps the global entry points in a disabled block; they are plain C exports of libopenvr_api.so. */
-extern intptr_t VR_InitInternal(EVRInitError *peError, EVRApplicationType eType);
-extern void VR_ShutdownInternal(void);
-extern intptr_t VR_GetGenericInterface(const char *pchInterfaceVersion, EVRInitError *peError);
-extern bool VR_IsRuntimeInstalled(void);
-extern const char *VR_GetVRInitErrorAsEnglishDescription(EVRInitError error);
+/* The C header keeps the global entry points in a disabled block; they are plain C exports of libopenvr_api.so. We load that library when the
+ * program starts (dlopen) instead of linking it: it then always matches the SteamVR on the Frame, and Sideframe can be built on a machine
+ * that has no SteamVR. The names below are function pointers so the rest of the code calls them like normal functions. */
+#include <dlfcn.h>
+static intptr_t (*VR_InitInternal)(EVRInitError *peError, EVRApplicationType eType);
+static void (*VR_ShutdownInternal)(void);
+static intptr_t (*VR_GetGenericInterface)(const char *pchInterfaceVersion, EVRInitError *peError);
+static bool (*VR_IsRuntimeInstalled)(void);
+static const char *(*VR_GetVRInitErrorAsEnglishDescription)(EVRInitError error);
+static bool vr_load_api(void) {
+    const char *paths[] = { "/opt/steamvr/bin/linuxarm64/libopenvr_api.so", "/opt/steamvr/bin/linux64/libopenvr_api.so", "libopenvr_api.so", NULL };
+    void *h = NULL; for (int i = 0; paths[i] && !h; i++) h = dlopen(paths[i], RTLD_NOW | RTLD_GLOBAL);
+    if (!h) { fprintf(stderr, "can't load SteamVR's libopenvr_api.so (%s) — is SteamVR installed?\n", dlerror()); return false; }
+    VR_InitInternal = (void *)dlsym(h, "VR_InitInternal"); VR_ShutdownInternal = (void *)dlsym(h, "VR_ShutdownInternal");
+    VR_GetGenericInterface = (void *)dlsym(h, "VR_GetGenericInterface"); VR_IsRuntimeInstalled = (void *)dlsym(h, "VR_IsRuntimeInstalled");
+    VR_GetVRInitErrorAsEnglishDescription = (void *)dlsym(h, "VR_GetVRInitErrorAsEnglishDescription");
+    if (!VR_InitInternal || !VR_ShutdownInternal || !VR_GetGenericInterface || !VR_IsRuntimeInstalled || !VR_GetVRInitErrorAsEnglishDescription) { fprintf(stderr, "libopenvr_api.so is missing expected functions\n"); return false; }
+    return true;
+}
 
 static const uint32_t vert_spv[] =
 #include "vert.spv.h"
@@ -580,6 +593,7 @@ static void vr_single_instance_toggle(void) {
 }
 
 static void vr_init(void) {
+    if (!vr_load_api()) exit(1);
     if (!VR_IsRuntimeInstalled()) { fprintf(stderr, "SteamVR runtime isn't installed\n"); exit(1); }
     EVRInitError err = EVRInitError_VRInitError_None;
     VR_InitInternal(&err, EVRApplicationType_VRApplication_Overlay);

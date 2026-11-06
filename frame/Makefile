@@ -10,15 +10,20 @@ PREFIX ?= $(HOME)/.local
 FFMPEG_PKGS = $(if $(HAVE_FFMPEG),libavformat libavcodec libavutil,)
 FFMPEG_DEF = $(if $(HAVE_FFMPEG),-DHAVE_FFMPEG,)
 COMMON = -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-missing-braces $(FFMPEG_DEF) -I/usr/include/libdrm $(shell pkg-config --cflags $(FFMPEG_PKGS) libsodium)
+# STATIC_SODIUM=1 links libsodium statically (used for the release build so it doesn't depend on the system's libsodium version)
+SODIUM_STATIC := -Wl,-Bstatic -lsodium -Wl,-Bdynamic
+SODIUM_LIBS = $(if $(STATIC_SODIUM),$(SODIUM_STATIC),$(shell pkg-config --libs libsodium))
 CFLAGS += $(COMMON) $(shell pkg-config --cflags wayland-client)
-LDLIBS += $(shell pkg-config --libs wayland-client $(FFMPEG_PKGS) libsodium) -lm
+LDLIBS += $(shell pkg-config --libs wayland-client $(FFMPEG_PKGS)) $(SODIUM_LIBS) -lm
 SRC = src/viewer.c $(filter-out src/viewer.c,$(wildcard src/*.c))
 SIDEFRAME_VERSION ?= $(shell cat ../VERSION 2>/dev/null || echo dev)
-SIDEFRAME_UPDATE_URL ?=   # https URL of a text file containing the latest version number; empty disables the update-check button
-SIDEFRAME_URL ?=   # shown in the app's "install the Mac app" hints, e.g. make SIDEFRAME_URL=github.com/you/sideframe
-OPENVR_INC ?= /opt/steamvr/tools/hellovr_vulkan_linux/src/openvr/headers
-OPENVR_LIB ?= /opt/steamvr/bin/linuxarm64
-VR_LIBS = $(shell pkg-config --libs $(FFMPEG_PKGS) libsodium) -L$(OPENVR_LIB) -lopenvr_api -Wl,-rpath,$(OPENVR_LIB) -lvulkan -lm
+# https URL of a text file containing the latest version number; empty disables the update-check button
+SIDEFRAME_UPDATE_URL ?=
+# shown in the app's "install the Mac app" hints, e.g. make SIDEFRAME_URL=github.com/you/sideframe
+SIDEFRAME_URL ?=
+# vendored header (BSD-3, see third_party/openvr/LICENSE); the library itself is loaded at run time
+OPENVR_INC ?= third_party/openvr
+VR_LIBS = $(shell pkg-config --libs $(FFMPEG_PKGS)) $(SODIUM_LIBS) -lvulkan -ldl -lm
 
 all: sideframe sideframe-window
 
