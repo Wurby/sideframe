@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
     snprintf(M.sel_name, sizeof M.sel_name, "Alex’s MacBook Air"); M.scr = SCR_ADD_CODE; strcpy(M.code, "889"); M.ncode = 3; menu_draw(0); dump(dir, "7_add_code");
     snprintf(M.err, sizeof M.err, "That code is wrong."); strcpy(M.code, "88973370"); M.ncode = 8; UI.mx = 200; UI.my = 600; menu_draw(0); dump(dir, "8_add_code_error_full");
 
+    M.scr = SCR_HOME; M.nmacs = 1; M.live = true; snprintf(M.target.name, sizeof M.target.name, "Alex’s MacBook Air"); menu_draw(0); dump(dir, "14_home_connected"); M.live = false; M.nmacs = 0;
     M.scr = SCR_SETTINGS; therm_temp_c = 72; therm_level = 0; M.upd_state = 2; UI.mx = 200; UI.my = 600; menu_draw(0); dump(dir, "13_settings");
     therm_temp_c = 88; therm_level = 1; ST.fps = 60; ST.preset = P_QUALITY; ST.autostart = true; M.upd_state = 3; snprintf(M.upd_ver, sizeof M.upd_ver, "0.2.0"); menu_draw(0); dump(dir, "13b_settings_warm");
     therm_level = 0; ST.fps = 30; ST.preset = P_BALANCED; ST.autostart = false; M.upd_state = 0;

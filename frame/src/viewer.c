@@ -700,7 +700,7 @@ int main(int argc, char **argv) {
                 if (streaming) { session_stop(); streaming = false; }
                 vr_show_closing(); usleep(1300000); running = false; continue;   /* like Framecorder: a short "Closing" screen, then exit */
             }
-            if (vr_toolbar_action == 1) { vr_toolbar_action = 0; session_stop(); streaming = false; menu_goto(SCR_HOME); continue; }
+            if (vr_toolbar_action == 1 || M.action == ACT_DISCONNECT) { vr_toolbar_action = 0; M.action = ACT_NONE; session_stop(); streaming = false; menu_goto(SCR_HOME); continue; }
             if (M.action == ACT_CANCEL_CONNECT) { M.action = ACT_NONE; if (streaming) { session_stop(); streaming = false; } menu_goto(SCR_HOME); continue; }
             if (M.action == ACT_CONNECT) {
                 M.action = ACT_NONE; char err[200] = {0};

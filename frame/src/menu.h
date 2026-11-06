@@ -21,7 +21,7 @@
 #define MAX_MACS 8
 
 enum scr { SCR_HOME, SCR_ADD_PICK, SCR_ADD_CODE, SCR_PAIRING, SCR_CONNECTING, SCR_CLOSING, SCR_SETTINGS };
-enum act { ACT_NONE, ACT_CONNECT, ACT_QUIT, ACT_CANCEL_CONNECT };
+enum act { ACT_NONE, ACT_CONNECT, ACT_QUIT, ACT_CANCEL_CONNECT, ACT_DISCONNECT };
 
 struct pair_job { char host[96]; int port; char code[16]; char name[96]; volatile int state; /* 0 idle 1 running 2 ok 3 failed */ struct mac_conf result; char err[256]; pthread_t th; };
 
@@ -38,6 +38,7 @@ static struct menu {
     struct mac_conf target; double connect_t0; char connect_status[160];
     int forget_armed; double forget_t; double search_t0;   /* when the Add-a-Mac search started (for the "still nothing?" help) */
     bool dirty;
+    bool live;                                 /* a Mac is on screen in the Sideframe tab right now */
     double t_draw;
     /* health (checked every few seconds) and the manual update check */
     bool net_ok, dec_ok; double health_t;
@@ -185,6 +186,15 @@ static void screen_home(double t) {
         if (ui_button(100, 440, 340, 72, "Add a Mac", 0, true, 30)) menu_goto(SCR_ADD_PICK);
         if (ui_button(MENU_WIDTH - 56 - 240, 628, 240, 60, "Close Sideframe", 3, true, 26)) M.action = ACT_QUIT;
         if (ui_button(56, 628, 240, 60, "Settings", 3, true, 26)) menu_goto(SCR_SETTINGS);
+        return;
+    }
+    if (M.live) {   /* streaming: the Mac is in the Sideframe tab; this tab is for Disconnect and Settings */
+        ui_rrect(56, 190, 1608, 250, 28, C_CARD); ui_rrect_line(56, 190, 1608, 250, 28, 2, C_LINE);
+        ui_circle(100, 242, 11, C_GREEN);
+        char b[200]; snprintf(b, sizeof b, "Connected to %s", M.target.name); ui_text(130, 222, b, 40, true, C_TEXT);
+        ui_paragraph(100, 292, 1500, "Your Mac is showing in the Sideframe tab. Use this Settings tab to change the picture or disconnect; close Sideframe with the Close button under the Sideframe tab.", 25, false, C_TEXT_DIM);
+        if (ui_button(100, 370, 300, 56, "Disconnect", 2, true, 26)) { M.action = ACT_DISCONNECT; M.dirty = true; }
+        if (ui_button(56, 632, 240, 60, "Settings", 1, true, 26)) menu_goto(SCR_SETTINGS);
         return;
     }
     ui_text(56, 168, "YOUR MACS", 20, true, C_TEXT_FAINT);

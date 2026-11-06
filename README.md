@@ -74,6 +74,7 @@ Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh
 
 ## Using it
 
+* Sideframe adds **two dashboard tabs**: the Sideframe tab (your Mac, with SteamVR's own Close button under it) and a **Sideframe Settings** tab (gear icon) that is always one tab away — change the frame rate/bitrate or disconnect without leaving the stream.
 * Point the laser at the tab to move the Mac's pointer; click, right-click and scroll work.
 * The keyboard button under the tab opens the SteamVR keyboard. A physical or Bluetooth keyboard types into the Mac while the laser is on the tab.
 * `sideframe --help`-style options: `--scale F` (force a fixed fraction of the Mac's resolution), `--max-fps N`, `--idle-exit SECONDS`.

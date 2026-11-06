@@ -47,6 +47,9 @@ static struct VR_IVROverlay_FnTable *ovl;
 static struct VR_IVRApplications_FnTable *vapps;
 static struct VR_IVRCompositor_FnTable *vcomp;
 static VROverlayHandle_t ov_main, ov_thumb;
+static VROverlayHandle_t ov_menu, ov_menu_thumb;   /* a second dashboard tab, "Sideframe Settings": the menu is always one tab away, even while the first tab streams */
+static bool menu_tab_visible; static double menu_vis_t;
+#define OVERLAY_KEY_MENU "org.sideframe.dashboard.menu"
 #include "kbd.h"
 static bool kb_focus = false; static double kb_focus_t;   /* the laser is on the tab (with a short grace): physical keyboards type into the Mac */
 static bool tab_visible = true;           /* refreshed from IsOverlayVisible() */
@@ -146,14 +149,15 @@ static void begin_cmd(void) {
     VK(vkBeginCommandBuffer(cmd, &bi));
 }
 
-static void tex_submit(struct tex *t) {   /* hand a finished texture to SteamVR */
+static void tex_submit_to(VROverlayHandle_t h, struct tex *t) {   /* hand a finished texture to an overlay */
     VRVulkanTextureData_t vd = { .m_nImage = (uint64_t)t->img, .m_pDevice = dev, .m_pPhysicalDevice = phys, .m_pInstance = inst, .m_pQueue = queue,
                                  .m_nQueueFamilyIndex = qfam, .m_nWidth = t->w, .m_nHeight = t->h, .m_nFormat = VK_FORMAT_R8G8B8A8_SRGB, .m_nSampleCount = 1 };
     Texture_t tex = { &vd, ETextureType_TextureType_Vulkan, EColorSpace_ColorSpace_Auto };
-    EVROverlayError e = ovl->SetOverlayTexture(ov_main, &tex);
+    EVROverlayError e = ovl->SetOverlayTexture(h, &tex);
     if (e != EVROverlayError_VROverlayError_None && vr_pushed < 3) fprintf(stderr, "SetOverlayTexture: %s (%d)\n", ovl->GetOverlayErrorNameFromEnum(e), (int)e);
     vr_pushed++;
 }
+static void tex_submit(struct tex *t) { tex_submit_to(ov_main, t); }
 
 /* ------------------------------------------------------------------ what the tab shows: the menu, or the live stream with a toolbar */
 enum vr_view_t { VIEW_MENU, VIEW_STREAM };
@@ -182,7 +186,8 @@ static void menu_present(double t) {
     menu_draw(t);
     memcpy(stg_map, ui_buf, (size_t)CARD_W * CARD_H * 4);
     upload_region(&card, 0, 0, CARD_W, CARD_H);
-    tex_submit(&card);
+    if (vr_view == VIEW_MENU) tex_submit(&card);                      /* the main tab shows the menu only when not streaming */
+    if (ov_menu && (menu_tab_visible || vr_view == VIEW_MENU)) tex_submit_to(ov_menu, &card);
 }
 
 static void tb_geom(int i, float *x, float *y, float *w, float *h) { toolbar_geom(tb_h, vid_w, i, x, y, w, h); }
@@ -198,12 +203,12 @@ static void toolbar_render(void) {
 
 /* menu <-> stream: which texture is on the tab, and how pointer coordinates are scaled */
 static void vr_enter_menu(void) {
-    vr_view = VIEW_MENU; menu_need = true; tb_hover = tb_down = -1;
+    vr_view = VIEW_MENU; menu_need = true; tb_hover = tb_down = -1; M.live = false; M.dirty = true;
     ovl->SetOverlayFlag(ov_main, VROverlayFlags_HideLaserIntersection, false);   /* the menu uses SteamVR's own cursor dot */
     HmdVector2_t sc = { (float)CARD_W, (float)CARD_H }; ovl->SetOverlayMouseScale(ov_main, &sc);
 }
 static void vr_enter_stream(void) {
-    vr_view = VIEW_STREAM; tb_hover = tb_down = -1; vr_toolbar_action = 0;
+    vr_view = VIEW_STREAM; tb_hover = tb_down = -1; vr_toolbar_action = 0; M.live = true; M.dirty = true; menu_need = true;
     ovl->SetOverlayFlag(ov_main, VROverlayFlags_HideLaserIntersection, true);    /* the Mac draws its own cursor in the video: hide SteamVR's dot */
     HmdVector2_t sc = { (float)outt.w, (float)outt.h }; ovl->SetOverlayMouseScale(ov_main, &sc);
     toolbar_render();
@@ -220,6 +225,8 @@ static void menu_frame(double t) {
     menu_present(t);
 }
 
+static void menu_mouse_move(float x, float y) { UI.mx = x; UI.my = CARD_H - y; UI.have_mouse = true; menu_need = true; }
+static void menu_mouse_button(bool down) { if (down) { UI.down = true; UI.down_x = UI.mx; UI.down_y = UI.my; } else { UI.down = false; UI.released = true; } menu_need = true; }
 static void vr_mouse_move(float x, float y) {
     kb_focus = true; kb_focus_t = now();              /* SteamVR overlay mouse: origin bottom-left, in the scaled coordinates we set */
     if (vr_view == VIEW_MENU) { UI.mx = x; UI.my = CARD_H - y; UI.have_mouse = true; menu_need = true; return; }
@@ -545,6 +552,18 @@ static void vr_poll(void) {
             default: break;
             }
         }
+        while (ov_menu && ovl->PollNextOverlayEvent(ov_menu, &ev, sizeof ev)) {        /* the Settings tab: menu input only */
+            switch (ev.eventType) {
+            case EVREventType_VREvent_MouseMove: menu_mouse_move(ev.data.mouse.x, ev.data.mouse.y); break;
+            case EVREventType_VREvent_MouseButtonDown: if (ev.data.mouse.button == 1) menu_mouse_button(true); break;
+            case EVREventType_VREvent_MouseButtonUp: if (ev.data.mouse.button == 1) menu_mouse_button(false); break;
+            default: break;
+            }
+        }
+        if (ov_menu && t - menu_vis_t >= 0.25) {
+            menu_vis_t = t; bool v = ovl->IsOverlayVisible(ov_menu);
+            if (v != menu_tab_visible) { menu_tab_visible = v; if (v) menu_need = true; }
+        }
         if (vr_force_visible) tab_visible = true;
         else if (t - vis_check_t >= 0.25) {
             bool v = ovl->IsOverlayVisible(ov_main);
@@ -566,9 +585,10 @@ static void vr_poll(void) {
         udp_msg(12, (uint32_t)f, (uint32_t)pc, NULL, 0);
     }   /* tell the Mac how much to send (idempotent re-send) */
     if (!tab_visible && !vr_force_visible && t - last_pause_t >= 1.0) { udp_msg(11, 1, 0, NULL, 0); last_pause_t = t; }   /* idempotent re-send: survives reconnects and lost packets */
-    if (tab_visible || vr_force_visible) hidden_since = 0;
+    if (tab_visible || menu_tab_visible || vr_force_visible) hidden_since = 0;
     else if (!hidden_since) hidden_since = t;
     else if (vr_idle_exit_s > 0 && t - hidden_since > vr_idle_exit_s) { fprintf(stderr, "the tab has been hidden for %.0f s — quitting to save power (tap the Sideframe entry to start it again)\n", vr_idle_exit_s); running = false; }
+    if (menu_tab_visible && vr_view == VIEW_STREAM) menu_frame(t);        /* the Settings tab is open while the stream runs in the other tab */
     if (tab_visible || vr_force_visible) {
         if (vr_view == VIEW_MENU) menu_frame(t);
         else if (tb_need && t - menu_draw_t >= 0.05) { tb_need = false; menu_draw_t = t; toolbar_render(); }
@@ -640,6 +660,12 @@ static void vr_init(void) {
     HmdVector2_t scale = { (float)CARD_W, (float)CARD_H };
     ovl->SetOverlayMouseScale(ov_main, &scale);
     if (access(icon, R_OK) == 0) ovl->SetOverlayFromFile(ov_thumb, icon);
+    /* the second tab: Settings / menu, reachable at any time from the dashboard */
+    if (ovl->CreateDashboardOverlay(OVERLAY_KEY_MENU, "Sideframe Settings", &ov_menu, &ov_menu_thumb) == EVROverlayError_VROverlayError_None) {
+        ovl->SetOverlayWidthInMeters(ov_menu, 1.9f);
+        ovl->SetOverlayInputMethod(ov_menu, VROverlayInputMethod_Mouse);
+        ovl->SetOverlayMouseScale(ov_menu, &scale);
+    } else { ov_menu = 0; fprintf(stderr, "couldn't create the Settings tab\n"); }
     vr_force_visible = getenv("MD_VR_ALWAYS") != NULL;
     vk_setup();
     ui_buf = malloc((size_t)CARD_W * CARD_H * 4);
@@ -648,6 +674,13 @@ static void vr_init(void) {
         ui_load_fonts(fdir);
     }
     settings_load(); menu_init(); disc_open();
+    if (ov_menu_thumb) {   /* a gear icon, drawn here, for the Settings tab's dashboard button */
+        static uint8_t g[128 * 128 * 4]; struct ui save = UI; UI.px = g; UI.w = 128; UI.h = 128; memset(g, 0, sizeof g);
+        ui_rrect(0, 0, 128, 128, 30, RGBA(0x1b, 0x27, 0x47, 255));
+        for (int i = 0; i < 8; i++) { float a = i * 0.7853982f; ui_circle(64 + cosf(a) * 38, 64 + sinf(a) * 38, 10, C_ACCENT); }
+        ui_circle(64, 64, 36, C_ACCENT); ui_circle(64, 64, 16, RGBA(0x1b, 0x27, 0x47, 255));
+        UI = save; ovl->SetOverlayRaw(ov_menu_thumb, g, 128, 128, 4);
+    }
     menu_present(now());
     fprintf(stderr, "dashboard tab \"Sideframe\" is ready\n");
 }
@@ -655,6 +688,7 @@ static void vr_init(void) {
 static void vr_shutdown(void) {
     if (vr_pid_path[0]) { FILE *f = fopen(vr_pid_path, "r"); long p = 0; if (f) { if (fscanf(f, "%ld", &p) == 1 && p == (long)getpid()) { fclose(f); unlink(vr_pid_path); } else fclose(f); } }
     if (vr_conv_n) fprintf(stderr, "NV12->RGBA conversion + hand-off to SteamVR: avg %.2f ms, max %.2f ms over %lu frames\n", vr_conv_sum / vr_conv_n * 1e3, vr_conv_max * 1e3, vr_conv_n);
+    if (ovl && ov_menu) ovl->DestroyOverlay(ov_menu);
     if (ovl && ov_main) ovl->DestroyOverlay(ov_main);
     VR_ShutdownInternal();
 }
