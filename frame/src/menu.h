@@ -21,7 +21,7 @@
 #define MAX_MACS 8
 
 enum scr { SCR_HOME, SCR_ADD_PICK, SCR_ADD_CODE, SCR_PAIRING, SCR_CONNECTING, SCR_CLOSING, SCR_SETTINGS };
-enum act { ACT_NONE, ACT_CONNECT, ACT_QUIT, ACT_CANCEL_CONNECT, ACT_DISCONNECT };
+enum act { ACT_NONE, ACT_CONNECT, ACT_QUIT, ACT_CANCEL_CONNECT, ACT_DISCONNECT, ACT_RESUME };
 
 struct pair_job { char host[96]; int port; char code[16]; char name[96]; volatile int state; /* 0 idle 1 running 2 ok 3 failed */ struct mac_conf result; char err[256]; pthread_t th; };
 
@@ -192,8 +192,9 @@ static void screen_home(double t) {
         ui_rrect(56, 190, 1608, 250, 28, C_CARD); ui_rrect_line(56, 190, 1608, 250, 28, 2, C_LINE);
         ui_circle(100, 242, 11, C_GREEN);
         char b[200]; snprintf(b, sizeof b, "Connected to %s", M.target.name); ui_text(130, 222, b, 40, true, C_TEXT);
-        ui_paragraph(100, 292, 1500, "Your Mac is showing in the Sideframe tab. Use this Settings tab to change the picture or disconnect; close Sideframe with the Close button under the Sideframe tab.", 25, false, C_TEXT_DIM);
-        if (ui_button(100, 370, 300, 56, "Disconnect", 2, true, 26)) { M.action = ACT_DISCONNECT; M.dirty = true; }
+        ui_paragraph(100, 292, 1500, "Your Mac is paused while this menu is open. Close Sideframe with the Close button under the tab in the dashboard.", 25, false, C_TEXT_DIM);
+        if (ui_button(100, 360, 300, 60, "Back to Mac", 0, true, 28)) { M.action = ACT_RESUME; M.dirty = true; }
+        if (ui_button(420, 360, 300, 60, "Disconnect", 2, true, 28)) { M.action = ACT_DISCONNECT; M.dirty = true; }
         if (ui_button(56, 632, 240, 60, "Settings", 1, true, 26)) menu_goto(SCR_SETTINGS);
         return;
     }
@@ -352,7 +353,7 @@ static void toolbar_paint(int w, int tb, int hover, const char *mac_name) {
 
 /* Draw the current screen into UI.px. */
 static void screen_settings(double t) {
-    if (ui_button(40, 36, 150, 56, "‹  Back", 3, true, 26)) { menu_goto(SCR_HOME); return; }
+    if (ui_button(40, 36, M.live ? 260 : 150, 56, M.live ? "‹  Back to Mac" : "‹  Back", 3, true, 26)) { if (M.live) M.action = ACT_RESUME; else menu_goto(SCR_HOME); return; }
     ui_text(56, 110, "Settings", 54, true, C_TEXT);
     /* frame rate */
     ui_text(56, 176, "FRAME RATE", 20, true, C_TEXT_FAINT);
