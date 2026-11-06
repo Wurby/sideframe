@@ -116,6 +116,7 @@ final class Server {
         // (A replayed HELLO from an attacker can create a pending session, but never gets promoted: it cannot produce valid DATA.)
         if let pend, sockaddrEqual(pp, sa), nowNs() - pat < 10_000_000_000, let plain = pend.open(pkt) {
             paused = false
+            statsLock.lock(); wantFps = 0; wantPct = 100; statsLock.unlock()   // a new session starts with no quality request from an earlier one
             lock.lock(); let replaced = active != nil; active = pend; activeName = pname; peer = sa; lastRxNs = nowNs(); pendingSession = nil; lock.unlock()
             if replaced { onSessionEnd?() }
             print("\(pname) authenticated from \(describe(sa)) — session started")

@@ -560,7 +560,11 @@ static void vr_poll(void) {
     /* physical keyboards: only while streaming, the tab visible, and the laser on it (1.5 s grace after it leaves) */
     kbd_service(t, vr_view == VIEW_STREAM && tab_visible && (kb_focus || t - kb_focus_t < 1.5), kb_send);
     if (therm_poll(t)) { fprintf(stderr, "temperature %d C: %s\n", therm_temp_c, therm_level == 0 ? "back to normal" : therm_level == 1 ? "easing off (warm)" : "easing off a lot (hot)"); menu_need = true; }
-    if (vr_view == VIEW_STREAM && t - q_sent_t >= 2.0) { q_sent_t = t; udp_msg(12, (uint32_t)eff_mac_fps(), (uint32_t)eff_mac_bitrate_pct(), NULL, 0); }   /* tell the Mac how much to send (idempotent re-send) */
+    if (vr_view == VIEW_STREAM && t - q_sent_t >= 2.0) {
+        q_sent_t = t; static int lf = -1, lp = -1; int f = eff_mac_fps(), pc = eff_mac_bitrate_pct();
+        if (f != lf || pc != lp) { lf = f; lp = pc; fprintf(stderr, "asking the Mac for at most %d pictures/s and %d%% of its video data\n", f, pc); }
+        udp_msg(12, (uint32_t)f, (uint32_t)pc, NULL, 0);
+    }   /* tell the Mac how much to send (idempotent re-send) */
     if (!tab_visible && !vr_force_visible && t - last_pause_t >= 1.0) { udp_msg(11, 1, 0, NULL, 0); last_pause_t = t; }   /* idempotent re-send: survives reconnects and lost packets */
     if (tab_visible || vr_force_visible) hidden_since = 0;
     else if (!hidden_since) hidden_since = t;
