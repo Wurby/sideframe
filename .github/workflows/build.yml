@@ -26,7 +26,7 @@ jobs:
             echo "== $f needs:"; readelf -d "$f" | awk '/NEEDED/{gsub(/[\[\]]/,"",$5); print "  " $5}'
           done
           # Only libraries every SteamOS install has. Anything else (ffmpeg, libsodium, libopenvr_api...) would break on some Frames.
-          bad=$(for f in sideframe sideframe-window; do readelf -d "$f" | awk '/NEEDED/{gsub(/[\[\]]/,"",$5); print $5}'; done | sort -u |
+          bad=$(for f in sideframe sideframe-window; do readelf -d "$f" | awk '/NEEDED/{print $5}'; done | tr -d '[]' | sort -u |
                 grep -v -E '^(libc\.so\.6|libm\.so\.6|libdl\.so\.2|libpthread\.so\.0|libfreetype\.so\.6|libvulkan\.so\.1|libwayland-client\.so\.0)$' || true)
           if [ -n "$bad" ]; then echo "Unexpected dependencies:"; echo "$bad"; exit 1; fi
           ./sideframe --selftest | tail -2
