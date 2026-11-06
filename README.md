@@ -8,6 +8,16 @@ pointer, a physical/Bluetooth keyboard, and the SteamVR keyboard back to the Mac
 > Sideframe is an independent open-source project. It is not affiliated with or endorsed by Apple or Valve.
 > "Mac" and "Steam Frame" are used only to describe what it works with.
 
+## Screenshots
+
+The Sideframe tab's screens (rendered from the app's own UI code with sample data):
+
+| Home | Add a Mac | Enter the code | Connecting |
+|---|---|---|---|
+| ![Home](docs/screenshots/home.png) | ![Add a Mac](docs/screenshots/add-a-mac.png) | ![Enter the code](docs/screenshots/enter-code.png) | ![Connecting](docs/screenshots/connecting.png) |
+
+Once connected, the tab shows only your Mac's screen.
+
 ## How it works
 
 ```
@@ -29,7 +39,7 @@ Frame: UDP → loss repair → V4L2 hardware decode → dmabuf → Vulkan → St
 
 ## Install
 
-Download both files from the [latest release](../../releases/latest) (replace the link with your repository's releases page).
+Download both files from the [latest release](../../releases/latest).
 
 **1. Mac** — `sideframe-mac-X.zip`
 
@@ -70,8 +80,9 @@ Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh
 
 ## Updates
 
-The Frame's home screen shows its version. Maintainers can set `make SIDEFRAME_UPDATE_URL=https://…/latest.txt` (a text file containing the newest
-version number); the app then shows a **Check for updates** button. It makes one small request only when pressed — never in the background.
+The Frame's home screen shows its version and has a **Check for updates** button. It makes one small request (a text file in this repository,
+`latest.txt`) only when you press it — never in the background — and tells you if a newer release exists. Download it from the releases page.
+Forks can point it elsewhere: `make SIDEFRAME_UPDATE_URL=https://…/latest.txt` (empty disables the button).
 
 ## Known limits
 

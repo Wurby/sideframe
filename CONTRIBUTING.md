@@ -14,3 +14,8 @@ The Frame and Mac apps are updated separately, so the wire protocol (docs/PROTOC
 * Only add new message types; receivers ignore types they don't know. Never change the layout of an existing message.
 * If a break is ever unavoidable, add a version exchange first (a new inner message carrying the protocol version) so each side can tell
   the user which app to update, and ship that exchange in a release before the breaking change.
+
+## Releasing
+
+1. Put the new version in `VERSION` and `latest.txt` (the Frame's update check reads `latest.txt` from `main`).
+2. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`. The `build` workflow builds the Frame tarball (arm64) and the Mac zip and attaches both to the release.

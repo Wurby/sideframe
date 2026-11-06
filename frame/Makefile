@@ -17,10 +17,10 @@ CFLAGS += $(COMMON) $(shell pkg-config --cflags wayland-client)
 LDLIBS += $(shell pkg-config --libs wayland-client $(FFMPEG_PKGS)) $(SODIUM_LIBS) -lm
 SRC = src/viewer.c $(filter-out src/viewer.c,$(wildcard src/*.c))
 SIDEFRAME_VERSION ?= $(shell cat ../VERSION 2>/dev/null || echo dev)
-# https URL of a text file containing the latest version number; empty disables the update-check button
-SIDEFRAME_UPDATE_URL ?=
+# https URL of a text file containing the latest version number (forks: point this at your own); empty disables the update-check button
+SIDEFRAME_UPDATE_URL ?= https://raw.githubusercontent.com/Wurby/sideframe/main/latest.txt
 # shown in the app's "install the Mac app" hints, e.g. make SIDEFRAME_URL=github.com/you/sideframe
-SIDEFRAME_URL ?=
+SIDEFRAME_URL ?= github.com/Wurby/sideframe
 # vendored header (BSD-3, see third_party/openvr/LICENSE); the library itself is loaded at run time
 OPENVR_INC ?= third_party/openvr
 VR_LIBS = $(if $(FFMPEG_PKGS),$(shell pkg-config --libs $(FFMPEG_PKGS)),) $(SODIUM_LIBS) -lvulkan -ldl -lm
