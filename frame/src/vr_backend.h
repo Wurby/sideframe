@@ -56,7 +56,12 @@ static double vr_min_interval = 0;              /* --max-fps N: an extra cap on 
 static double vr_interval(void) { double e = eff_min_interval(); return vr_min_interval > e ? vr_min_interval : e; }   /* each update makes SteamVR copy a large image */
 static double vr_out_scale = 0;                 /* --scale F (0.25...1) forces a fixed fraction of the Mac display; 0 (default) = automatic: sized from the headset, see vr_auto_cap_w */
 static int vr_render_w = 2160;                  /* the headset's recommended per-eye render width (read from SteamVR in vr_init) */
-static int vr_auto_cap_w(void) { return (int)(vr_render_w * eff_size_factor()) & ~1; }   /* widest texture worth sending; depends on Settings */                /* widest texture worth sending: ~1.2x the headset's per-eye render width (read from SteamVR in vr_init) */
+static int vr_src_w, vr_src_h;                  /* Mac display size (set when the picture texture is built) */
+static int vr_auto_cap_w(void) {
+    if (ST.preset == P_QUALITY) return 8192;                                   /* Quality: the Mac's native resolution, never scaled down */
+    int src = vr_src_w > 0 ? vr_src_w : 3440;
+    return (int)(src * (ST.preset == P_BALANCED ? 0.75 : 0.5)) & ~1;           /* Balanced 75%, Performance 50% of the Mac's width */
+}
 static double vr_idle_exit_s = 0;               /* --idle-exit SECONDS: quit after the tab has been hidden this long (0 = never) */
 static void udp_msg(uint8_t type, uint32_t seq, uint32_t val, const uint16_t *idx, int n);   /* defined in viewer.c */
 static void udp_text(const char *utf8, int n);   /* defined in viewer.c */
@@ -329,7 +334,7 @@ static VkShaderModule shader(const uint32_t *code, size_t bytes) {
     VkShaderModule m; VK(vkCreateShaderModule(dev, &ci, NULL, &m)); return m;
 }
 
-static int vr_src_w, vr_src_h, vr_built_cap_w, vr_tw, vr_th;   /* Mac display size, the size cap the texture was built for, texture size */
+static int vr_built_cap_w, vr_tw, vr_th;   /* the size cap the texture was built for, texture size */
 
 /* (Re)build the texture SteamVR shows: the picture plus the strip for the cog. Called at start and again when Settings change the size cap. */
 static void vr_build_target(int srcw, int srch) {
