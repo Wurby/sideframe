@@ -74,7 +74,7 @@ Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh
 
 ## Using it
 
-* A small **settings cog** fades in at the bottom-right corner of the picture whenever the laser is on the tab (and fades out when you stop moving). Click it for Settings, Disconnect or **Back to Mac**; the Mac pauses while the menu is open. Close Sideframe with the Close button under the tab.
+* A small **settings cog** sits in a transparent strip just to the right of the picture (never over it) and brightens as the laser nears it. Click it for Settings, Disconnect or **Back to Mac**; the Mac pauses while the menu is open. Close Sideframe with the Close button under the tab.
 * Point the laser at the tab to move the Mac's pointer; click, right-click and scroll work.
 * The keyboard button under the tab opens the SteamVR keyboard. A physical or Bluetooth keyboard types into the Mac while the laser is on the tab.
 * `sideframe --help`-style options: `--scale F` (force a fixed fraction of the Mac's resolution), `--max-fps N`, `--idle-exit SECONDS`.

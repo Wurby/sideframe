@@ -164,12 +164,13 @@ static int tb_hover = -1, tb_down = -1;       /* toolbar button under the pointe
 static int vr_toolbar_action;                 /* set by a toolbar click: 1 = Menu (disconnect), 2 = Close the app */
 static bool menu_need = true, tb_need;        /* something changed: redraw the menu / the toolbar */
 static double menu_draw_t;
-/* The settings cog: drawn by the picture shader into a corner of the video (transparent unless the laser is on the tab), so the menu is one click
+/* The settings cog: drawn by the picture shader into a transparent strip BESIDE the picture (never over it), so the menu is one click
  * away while streaming. Positions are in texture pixels (origin top-left); mouse events use the same size with a bottom-left origin. */
 static float cog_alpha, cog_rendered = -1, cog_cx, cog_cy, cog_r; static bool cog_over, cog_near, cog_down, cog_dirty;
+static int side_w;                            /* width of the transparent strip beside the picture that holds the cog */
 static bool menu_over;                        /* the menu is showing over a live session (the picture is paused until "Back to Mac") */
 static int vr_last_idx = -1, vr_since_present;   /* last frame shown, to redraw it when only the cog changed (safe for a few frames: the decoder reuses buffers in order) */
-static void cog_geom(int vw, int vh) { cog_r = vw * 0.018f; float m = cog_r * 1.0f; cog_cx = vw - m - cog_r * 1.25f; cog_cy = vh - m - cog_r * 1.25f; }
+static void cog_geom(int vw, int vh) { cog_r = side_w * 0.30f; cog_cx = vw + side_w * 0.5f; cog_cy = vh * 0.5f; }   /* centred in the strip beside the picture, halfway down */
 static bool cog_hit(float x, float y, float k, int vh) { float dx = x - cog_cx, dy = (vh - y) - cog_cy; return dx * dx + dy * dy < cog_r * k * cog_r * k; }
 
 /* copy the staging buffer into a region of a texture; the texture ends up in COLOR_ATTACHMENT_OPTIMAL (what SteamVR is given) */
@@ -221,7 +222,7 @@ static void vr_show_closing(void) {
 }
 
 static void vr_open_menu_over(void) {            /* the cog was clicked: Settings over the live session */
-    menu_over = true; vr_view = VIEW_MENU; M.live = true; menu_goto(SCR_SETTINGS); menu_need = true; tb_hover = tb_down = -1; cog_alpha = 0; cog_down = cog_over = false;
+    menu_over = true; vr_view = VIEW_MENU; M.live = true; menu_goto(SCR_SETTINGS); menu_need = true; tb_hover = tb_down = -1; cog_down = cog_over = cog_near = false;
     ovl->SetOverlayFlag(ov_main, VROverlayFlags_HideLaserIntersection, false);
     HmdVector2_t sc = { (float)CARD_W, (float)CARD_H }; ovl->SetOverlayMouseScale(ov_main, &sc);
     udp_msg(10, 0, 0, NULL, 0); udp_msg(11, 1, 0, NULL, 0); last_pause_t = now();        /* release held keys; the Mac stops capturing while we look at the menu */
@@ -242,8 +243,9 @@ static void vr_mouse_move(float x, float y) {
     if (vr_view == VIEW_MENU) { UI.mx = x; UI.my = CARD_H - y; UI.have_mouse = true; menu_need = true; return; }
     if (vid_w <= 0 || vid_h <= 0) return;
     vr_ptr_t = now();                                       /* pointer in use: poll events faster for a while (see vr_poll) */
-    cog_geom(vid_w, vid_h); cog_over = cog_hit(x, y, 1.7f, vid_h); cog_near = cog_hit(x, y, 3.2f, vid_h);
+    cog_geom(vid_w, vid_h); cog_over = cog_hit(x, y, 1.7f, vid_h); cog_near = cog_hit(x, y, 2.6f, vid_h);
     if (cog_over) return;                                    /* over the cog: it is ours, not the Mac's */
+    if (x >= vid_w) return;                                  /* in the strip beside the picture: nothing for the Mac */
     double nx = x / vid_w, ny = 1.0 - y / vid_h;            /* overlay origin is bottom-left; the Mac's is top-left */
     if (nx < 0) nx = 0; if (nx > 1) nx = 1; if (ny < 0) ny = 0; if (ny > 1) ny = 1;
     udp_msg(5, (uint32_t)(nx * 1e6), (uint32_t)(ny * 1e6), NULL, 0);   /* MOVE: position as millionths of the Mac display */
@@ -333,9 +335,9 @@ static void vr_setup_output(int srcw, int srch) {
     double sc = vr_out_scale > 0 ? vr_out_scale : (srcw > vr_auto_cap_w() ? (double)vr_auto_cap_w() / srcw : 1.0);
     int w = (int)(srcw * sc + 0.5) & ~1, h = (int)(srch * sc + 0.5) & ~1;   /* even sizes */
     if (sc < 0.999) fprintf(stderr, "efficient mode: SteamVR texture %dx%d (%.0f%% of the Mac display)\n", w, h, sc * 100);
-    vid_w = w; vid_h = h; tb_h = 0;   /* the stream is the Mac screen and nothing else: no toolbar strip */
-    int th = h + tb_h;
-    make_tex(&outt, w, th, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vid_w = w; vid_h = h; tb_h = 0; side_w = ((int)(w * 0.05 + 0.5)) & ~1; if (side_w < 48) side_w = 48;   /* the picture, plus a transparent strip beside it for the cog */
+    int tw = w + side_w, th = h + tb_h;
+    make_tex(&outt, tw, th, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     VkImageViewCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = outt.img, .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_SRGB,
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
     VK(vkCreateImageView(dev, &vi, NULL, &outt.view));
@@ -347,7 +349,7 @@ static void vr_setup_output(int srcw, int srch) {
     VkSubpassDescription sp = { .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .colorAttachmentCount = 1, .pColorAttachments = &ref };
     VkRenderPassCreateInfo rpi = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = 1, .pAttachments = &att, .subpassCount = 1, .pSubpasses = &sp };
     VK(vkCreateRenderPass(dev, &rpi, NULL, &rpass));
-    VkFramebufferCreateInfo fbi = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = rpass, .attachmentCount = 1, .pAttachments = &outt.view, .width = w, .height = th, .layers = 1 };
+    VkFramebufferCreateInfo fbi = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = rpass, .attachmentCount = 1, .pAttachments = &outt.view, .width = tw, .height = th, .layers = 1 };
     VK(vkCreateFramebuffer(dev, &fbi, NULL, &outt.fb));
 
     /* the target starts in COLOR_ATTACHMENT_OPTIMAL (what the render pass expects and what SteamVR is given) */
@@ -376,7 +378,7 @@ static void vr_setup_output(int srcw, int srch) {
     VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, CAP_MAX };
     VkDescriptorPoolCreateInfo dpi = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = CAP_MAX, .poolSizeCount = 1, .pPoolSizes = &ps };
     VK(vkCreateDescriptorPool(dev, &dpi, NULL, &dpool));
-    VkPushConstantRange pcr = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16 };   /* the cog: x, y, radius, alpha */
+    VkPushConstantRange pcr = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 };   /* the cog: x, y, radius, alpha; then the draw mode */
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pcr };
     VK(vkCreatePipelineLayout(dev, &pli, NULL, &pipe_layout));
 
@@ -399,16 +401,16 @@ static void vr_setup_output(int srcw, int srch) {
     VK(vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gp, NULL, &pipeline));
     vkDestroyShaderModule(dev, vs, NULL); vkDestroyShaderModule(dev, fs, NULL);
 
-    ovl->SetOverlayWidthInMeters(ov_main, 2.4f);
+    ovl->SetOverlayWidthInMeters(ov_main, 2.4f * tw / w);   /* the picture keeps its size; the strip sits beside it */
     if (getenv("MD_VR_CHECK")) {
         vr_checks_left = 2;
-        VkBufferCreateInfo cbi = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)w * th * 4, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
+        VkBufferCreateInfo cbi = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)tw * th * 4, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
         VK(vkCreateBuffer(dev, &cbi, NULL, &chk)); VkMemoryRequirements cmr; vkGetBufferMemoryRequirements(dev, chk, &cmr);
         VkMemoryAllocateInfo cma = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = cmr.size,
             .memoryTypeIndex = find_mem(cmr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) };
         VK(vkAllocateMemory(dev, &cma, NULL, &chk_mem)); VK(vkBindBufferMemory(dev, chk, chk_mem, 0)); VK(vkMapMemory(dev, chk_mem, 0, VK_WHOLE_SIZE, 0, (void **)&chk_map));
     }
-    fprintf(stderr, "video output texture %dx%d ready (video %dx%d + %d-row toolbar)\n", w, th, w, h, tb_h);
+    fprintf(stderr, "video output texture %dx%d ready (video %dx%d + %d px strip for the settings cog)\n", tw, th, w, h, side_w);
 }
 
 /* Import decoder capture buffer i (an NV12 dmabuf) as a Vulkan image without copying it. */
@@ -469,9 +471,13 @@ static void vr_present(int i) {
     vkCmdSetViewport(cmd, 0, 1, &vpt); vkCmdSetScissor(cmd, 0, 1, &sc);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout, 0, 1, &m->ds, 0, NULL);
-    cog_geom(vid_w, vid_h); float pc[4] = { cog_cx, cog_cy, cog_r, menu_over ? 0.0f : cog_alpha };
+    cog_geom(vid_w, vid_h); float pc[8] = { cog_cx, cog_cy, cog_r, cog_alpha, 0, 0, 0, 0 };
     vkCmdPushConstants(cmd, pipe_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdDraw(cmd, 3, 1, 0, 0);                                                /* the picture */
+    VkViewport sv = { (float)vid_w, 0, (float)side_w, (float)vid_h, 0, 1 }; VkRect2D ss = { { vid_w, 0 }, { (uint32_t)side_w, (uint32_t)vid_h } };
+    pc[4] = 1.0f; vkCmdSetViewport(cmd, 0, 1, &sv); vkCmdSetScissor(cmd, 0, 1, &ss);
+    vkCmdPushConstants(cmd, pipe_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
+    vkCmdDraw(cmd, 3, 1, 0, 0);                                                /* the strip beside it: transparent, except the cog */
     vkCmdEndRenderPass(cmd);
     img_barrier(cmd, m->img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, qfam, VK_QUEUE_FAMILY_FOREIGN_EXT, VK_ACCESS_SHADER_READ_BIT, 0);
     bool checking = vr_checks_left > 0;
@@ -556,11 +562,11 @@ static void vr_poll(void) {
     double t = now();
     if (getenv("MD_VR_COG")) { cog_alpha = (float)atof(getenv("MD_VR_COG")); }
     if (M.action == ACT_RESUME) { M.action = ACT_NONE; if (menu_over) vr_resume_stream(); }
-    if (vr_view == VIEW_STREAM && !menu_over) {   /* the cog fades in while the laser is on the tab, out two seconds after it stops moving */
+    if (vr_view == VIEW_STREAM && !menu_over) {   /* the cog brightens as the laser nears it */
         static double lt; float dt = lt ? (float)(t - lt) : 0; lt = t; if (dt > 0.2f) dt = 0.2f;
-        float target = cog_over ? 0.95f : cog_near ? 0.75f : (t - vr_ptr_t < 2.0 ? 0.40f : 0.0f);
+        float target = cog_over ? 1.0f : cog_near ? 0.85f : 0.45f;   /* always there, beside the picture; brighter as the laser approaches */
         float step = 3.5f * dt; cog_alpha += cog_alpha < target ? (target - cog_alpha < step ? target - cog_alpha : step) : -(cog_alpha - target < step ? cog_alpha - target : step);
-        if (fabsf(cog_alpha - cog_rendered) > 0.04f || (cog_alpha == 0 && cog_rendered > 0)) cog_dirty = true;
+        if (fabsf(cog_alpha - cog_rendered) > 0.04f) cog_dirty = true;
     }
     if (t - vr_ev_t >= (vr_view == VIEW_STREAM && t - vr_ptr_t < 1.0 ? 0.008 : 0.033)) {                 /* every overlay-event poll is an IPC round trip to SteamVR: at most ~30 per second */
         vr_ev_t = t;
