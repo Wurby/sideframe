@@ -329,19 +329,24 @@ static VkShaderModule shader(const uint32_t *code, size_t bytes) {
     VkShaderModule m; VK(vkCreateShaderModule(dev, &ci, NULL, &m)); return m;
 }
 
-static void vr_setup_output(int srcw, int srch) {
+static int vr_src_w, vr_src_h, vr_built_cap_w, vr_tw, vr_th;   /* Mac display size, the size cap the texture was built for, texture size */
+
+/* (Re)build the texture SteamVR shows: the picture plus the strip for the cog. Called at start and again when Settings change the size cap. */
+static void vr_build_target(int srcw, int srch) {
     /* Automatic sizing: the tab has a fixed physical width, so the headset can only show about vr_auto_cap_w pixels across it, whatever
      * the Mac display is. Never upscale; keep the Mac's aspect ratio (works for 16:9, 16:10, ultrawide, 5K, ...). */
-    double sc = vr_out_scale > 0 ? vr_out_scale : (srcw > vr_auto_cap_w() ? (double)vr_auto_cap_w() / srcw : 1.0);
+    vr_src_w = srcw; vr_src_h = srch; vr_built_cap_w = vr_auto_cap_w();
+    double sc = vr_out_scale > 0 ? vr_out_scale : (srcw > vr_built_cap_w ? (double)vr_built_cap_w / srcw : 1.0);
     int w = (int)(srcw * sc + 0.5) & ~1, h = (int)(srch * sc + 0.5) & ~1;   /* even sizes */
     if (sc < 0.999) fprintf(stderr, "efficient mode: SteamVR texture %dx%d (%.0f%% of the Mac display)\n", w, h, sc * 100);
     vid_w = w; vid_h = h; tb_h = 0; side_w = ((int)(w * 0.05 + 0.5)) & ~1; if (side_w < 48) side_w = 48;   /* the picture, plus a transparent strip beside it for the cog */
-    int tw = w + side_w, th = h + tb_h;
+    int tw = w + side_w, th = h + tb_h; vr_tw = tw; vr_th = th;
     make_tex(&outt, tw, th, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     VkImageViewCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = outt.img, .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_SRGB,
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
     VK(vkCreateImageView(dev, &vi, NULL, &outt.view));
 
+    if (!rpass) {
     VkAttachmentDescription att = { .format = VK_FORMAT_R8G8B8A8_SRGB, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,   /* keep the toolbar strip: only the video area is redrawn */
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
@@ -349,6 +354,7 @@ static void vr_setup_output(int srcw, int srch) {
     VkSubpassDescription sp = { .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .colorAttachmentCount = 1, .pColorAttachments = &ref };
     VkRenderPassCreateInfo rpi = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = 1, .pAttachments = &att, .subpassCount = 1, .pSubpasses = &sp };
     VK(vkCreateRenderPass(dev, &rpi, NULL, &rpass));
+    }
     VkFramebufferCreateInfo fbi = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = rpass, .attachmentCount = 1, .pAttachments = &outt.view, .width = tw, .height = th, .layers = 1 };
     VK(vkCreateFramebuffer(dev, &fbi, NULL, &outt.fb));
 
@@ -356,6 +362,27 @@ static void vr_setup_output(int srcw, int srch) {
     begin_cmd();
     img_barrier(cmd, outt.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, 0, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
     submit_wait(); outt.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ovl->SetOverlayWidthInMeters(ov_main, 2.4f * tw / w);   /* the picture keeps its size; the strip sits beside it */
+}
+
+/* Settings changed the size cap (Quality / Balanced / Performance): swap in a texture of the new size. The picture refills on the next frame. */
+static bool vr_resize_if_needed(void) {
+    if (!outt.img || !vr_src_w || getenv("MD_VR_CHECK") || vr_auto_cap_w() == vr_built_cap_w) return false;
+    int ow = vid_w, oh = vid_h;
+    vkDeviceWaitIdle(dev);
+    vkDestroyFramebuffer(dev, outt.fb, NULL); vkDestroyImageView(dev, outt.view, NULL); vkDestroyImage(dev, outt.img, NULL); vkFreeMemory(dev, outt.mem, NULL);
+    memset(&outt, 0, sizeof outt);
+    vr_build_target(vr_src_w, vr_src_h);
+    if (vid_w == ow && vid_h == oh) return false;       /* the cap changed but the size did not (the display is smaller than either cap) */
+    fprintf(stderr, "picture size changed to %dx%d for the new setting\n", vid_w, vid_h);
+    if (vr_view == VIEW_STREAM) { HmdVector2_t sc = { (float)outt.w, (float)outt.h }; ovl->SetOverlayMouseScale(ov_main, &sc); }
+    cog_dirty = true; udp_msg(3, 0, 0, NULL, 0);            /* ask the Mac for a fresh picture to fill it */
+    return true;
+}
+
+static void vr_setup_output(int srcw, int srch) {
+    vr_build_target(srcw, srch);
+    int tw = vr_tw, th = vr_th, w = vid_w, h = vid_h;
 
     /* hardware YCbCr -> RGB: BT.709, limited range (what VideoToolbox produced), 4:2:0 "left" chroma siting */
     VkFormatProperties fp; vkGetPhysicalDeviceFormatProperties(phys, VK_FORMAT_G8_B8R8_2PLANE_420_UNORM, &fp);
@@ -401,7 +428,6 @@ static void vr_setup_output(int srcw, int srch) {
     VK(vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gp, NULL, &pipeline));
     vkDestroyShaderModule(dev, vs, NULL); vkDestroyShaderModule(dev, fs, NULL);
 
-    ovl->SetOverlayWidthInMeters(ov_main, 2.4f * tw / w);   /* the picture keeps its size; the strip sits beside it */
     if (getenv("MD_VR_CHECK")) {
         vr_checks_left = 2;
         VkBufferCreateInfo cbi = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)tw * th * 4, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
@@ -553,7 +579,7 @@ static void vr_teardown_output(void) {
     if (outt.img) vkDestroyImage(dev, outt.img, NULL);
     if (outt.mem) vkFreeMemory(dev, outt.mem, NULL);
     memset(&outt, 0, sizeof outt);
-    vid_w = vid_h = tb_h = 0; vr_held = -1; vr_have_video = false; vr_checks_left = 0;
+    vid_w = vid_h = tb_h = 0; vr_src_w = vr_src_h = vr_built_cap_w = 0; vr_held = -1; vr_have_video = false; vr_checks_left = 0;
     vr_enter_menu();
 }
 
@@ -609,6 +635,7 @@ static void vr_poll(void) {
     /* physical keyboards: only while streaming, the tab visible, and the laser on it (1.5 s grace after it leaves) */
     kbd_service(t, vr_view == VIEW_STREAM && tab_visible && (kb_focus || t - kb_focus_t < 1.5), kb_send);
     if (therm_poll(t)) { fprintf(stderr, "temperature %d C: %s\n", therm_temp_c, therm_level == 0 ? "back to normal" : therm_level == 1 ? "easing off (warm)" : "easing off a lot (hot)"); menu_need = true; }
+    vr_resize_if_needed();                                  /* Quality / Balanced / Performance changes the picture size right away */
     if (vr_view == VIEW_STREAM && t - q_sent_t >= 2.0) {
         q_sent_t = t; static int lf = -1, lp = -1; int f = eff_mac_fps(), pc = eff_mac_bitrate_pct(), qp = eff_mac_maxqp();
         if (f != lf || pc != lp) { lf = f; lp = pc; fprintf(stderr, "asking the Mac for at most %d pictures/s, %d%% of its video data, quality ceiling QP %d\n", f, pc, qp); }
