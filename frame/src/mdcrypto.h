@@ -29,15 +29,31 @@ static void hmac16(uint8_t out[16], const char *label, const uint8_t *a, size_t 
     crypto_auth_hmacsha256(full, msg, o, psk); memcpy(out, full, 16);
 }
 
+/* HKDF-SHA256 (RFC 5869), built on HMAC-SHA256 so it works with any libsodium (the built-in crypto_kdf_hkdf_* needs 1.0.19+). */
+#define HKDF_KEYBYTES 32
+static void hkdf_extract(uint8_t prk[32], const uint8_t *salt, size_t sl, const uint8_t *ikm, size_t il) {
+    crypto_auth_hmacsha256_state st; crypto_auth_hmacsha256_init(&st, salt, sl); crypto_auth_hmacsha256_update(&st, ikm, il); crypto_auth_hmacsha256_final(&st, prk);
+}
+static void hkdf_expand(uint8_t *out, size_t olen, const char *info, size_t ilen, const uint8_t prk[32]) {
+    uint8_t t[32]; size_t tl = 0, done = 0; uint8_t ctr = 1;
+    while (done < olen) {
+        crypto_auth_hmacsha256_state st; crypto_auth_hmacsha256_init(&st, prk, 32);
+        crypto_auth_hmacsha256_update(&st, t, tl); crypto_auth_hmacsha256_update(&st, (const uint8_t *)info, ilen); crypto_auth_hmacsha256_update(&st, &ctr, 1);
+        crypto_auth_hmacsha256_final(&st, t); tl = 32; ctr++;
+        size_t n = olen - done < 32 ? olen - done : 32; memcpy(out + done, t, n); done += n;
+    }
+    sodium_memzero(t, sizeof t);
+}
+
 /* ---- encrypted session ---- */
 struct sess { uint8_t sk[32], rk[32], sp[4], rp[4]; uint64_t sctr, hi; bool any; uint8_t seen[2048]; };
 static struct sess S;
 static void sess_derive(struct sess *s, const uint8_t cn_[16], const uint8_t sn[16], bool server) {
-    uint8_t salt[32], prk[crypto_kdf_hkdf_sha256_KEYBYTES], m2f[36], f2m[36];
+    uint8_t salt[32], prk[HKDF_KEYBYTES], m2f[36], f2m[36];
     memcpy(salt, cn_, 16); memcpy(salt + 16, sn, 16);
-    crypto_kdf_hkdf_sha256_extract(prk, salt, sizeof salt, psk, sizeof psk);
-    crypto_kdf_hkdf_sha256_expand(m2f, sizeof m2f, "sideframe m2f", 13, prk);
-    crypto_kdf_hkdf_sha256_expand(f2m, sizeof f2m, "sideframe f2m", 13, prk);
+    hkdf_extract(prk, salt, sizeof salt, psk, sizeof psk);
+    hkdf_expand(m2f, sizeof m2f, "sideframe m2f", 13, prk);
+    hkdf_expand(f2m, sizeof f2m, "sideframe f2m", 13, prk);
     const uint8_t *snd = server ? m2f : f2m, *rcv = server ? f2m : m2f;
     memcpy(s->sk, snd, 32); memcpy(s->sp, snd + 32, 4); memcpy(s->rk, rcv, 32); memcpy(s->rp, rcv + 32, 4);
     s->sctr = 0; s->any = false; s->hi = 0; memset(s->seen, 0, sizeof s->seen);
@@ -102,9 +118,9 @@ static void pair_confirm(uint8_t out[32], char role, const uint8_t codeKey[32], 
     crypto_auth_hmacsha256(out, m, sizeof m, codeKey);
 }
 static void pair_psk(uint8_t out[32], const uint8_t dh[32], const uint8_t T[32]) {
-    uint8_t prk[crypto_kdf_hkdf_sha256_KEYBYTES];
-    crypto_kdf_hkdf_sha256_extract(prk, T, 32, dh, 32);
-    crypto_kdf_hkdf_sha256_expand(out, 32, "sideframe psk v1", 16, prk);
+    uint8_t prk[HKDF_KEYBYTES];
+    hkdf_extract(prk, T, 32, dh, 32);
+    hkdf_expand(out, 32, "sideframe psk v1", 16, prk);
     sodium_memzero(prk, sizeof prk);
 }
 
