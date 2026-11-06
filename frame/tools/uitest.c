@@ -42,8 +42,8 @@ int main(int argc, char **argv) {
     snprintf(M.err, sizeof M.err, "That code is wrong."); strcpy(M.code, "88973370"); M.ncode = 8; UI.mx = 200; UI.my = 600; menu_draw(0); dump(dir, "8_add_code_error_full");
 
     M.scr = SCR_SETTINGS; therm_temp_c = 72; therm_level = 0; M.upd_state = 2; UI.mx = 200; UI.my = 600; menu_draw(0); dump(dir, "13_settings");
-    therm_temp_c = 88; therm_level = 1; ST.quality = Q_EFFICIENT; ST.autostart = true; M.upd_state = 3; snprintf(M.upd_ver, sizeof M.upd_ver, "0.2.0"); menu_draw(0); dump(dir, "13b_settings_warm");
-    therm_level = 0; ST.quality = Q_SHARP; ST.autostart = false; M.upd_state = 0;
+    therm_temp_c = 88; therm_level = 1; ST.fps = 60; ST.preset = P_QUALITY; ST.autostart = true; M.upd_state = 3; snprintf(M.upd_ver, sizeof M.upd_ver, "0.2.0"); menu_draw(0); dump(dir, "13b_settings_warm");
+    therm_level = 0; ST.fps = 30; ST.preset = P_BALANCED; ST.autostart = false; M.upd_state = 0;
     M.scr = SCR_PAIRING; menu_draw(0.3); dump(dir, "9_pairing");
     M.scr = SCR_CLOSING; menu_draw(0); dump(dir, "11_closing");
     M.scr = SCR_CONNECTING; snprintf(M.target.name, sizeof M.target.name, "Alex’s MacBook Air"); snprintf(M.connect_status, sizeof M.connect_status, "Waiting for the Mac to answer…"); menu_draw(0.3); dump(dir, "10_connecting");

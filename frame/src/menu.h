@@ -344,23 +344,31 @@ static void toolbar_paint(int w, int tb, int hover, const char *mac_name) {
 static void screen_settings(double t) {
     if (ui_button(40, 36, 150, 56, "‹  Back", 3, true, 26)) { menu_goto(SCR_HOME); return; }
     ui_text(56, 110, "Settings", 54, true, C_TEXT);
-    /* picture quality */
-    ui_text(56, 200, "PICTURE", 20, true, C_TEXT_FAINT);
-    if (ui_button(56, 232, 230, 64, "Sharp", ST.quality == Q_SHARP ? 0 : 1, true, 28)) { ST.quality = Q_SHARP; settings_save(); M.dirty = true; }
-    if (ui_button(300, 232, 230, 64, "Efficient", ST.quality == Q_EFFICIENT ? 0 : 1, true, 28)) { ST.quality = Q_EFFICIENT; settings_save(); M.dirty = true; }
-    ui_paragraph(560, 236, 1100, ST.quality == Q_SHARP ? "Sharpest picture and smoothest motion. Uses more power and runs warmer."
-                                                        : "A slightly smaller picture and fewer updates per second. Cooler and quieter on the Frame.", 24, false, C_TEXT_DIM);
-    ui_text(56, 306, "Takes effect the next time you connect. The picture size always follows your headset and your Mac’s display.", 20, false, C_TEXT_FAINT);
+    /* frame rate */
+    ui_text(56, 176, "FRAME RATE", 20, true, C_TEXT_FAINT);
+    if (ui_button(56, 204, 170, 58, "30", ST.fps == 30 ? 0 : 1, true, 28)) { ST.fps = 30; settings_save(); M.dirty = true; }
+    if (ui_button(240, 204, 170, 58, "60", ST.fps == 60 ? 0 : 1, true, 28)) { ST.fps = 60; settings_save(); M.dirty = true; }
+    ui_paragraph(440, 208, 1220, ST.fps == 30 ? "Aim for 30 pictures a second. Each one gets more detail, and it is easier on the Frame and your Wi-Fi."
+                                               : "Aim for 60 pictures a second: smoother cursor and motion. Needs a good Wi-Fi link and runs warmer.", 23, false, C_TEXT_DIM);
+    /* bitrate */
+    ui_text(56, 286, "BITRATE", 20, true, C_TEXT_FAINT);
+    if (ui_button(56, 314, 230, 58, "Quality", ST.preset == P_QUALITY ? 0 : 1, true, 26)) { ST.preset = P_QUALITY; settings_save(); M.dirty = true; }
+    if (ui_button(300, 314, 230, 58, "Balanced", ST.preset == P_BALANCED ? 0 : 1, true, 26)) { ST.preset = P_BALANCED; settings_save(); M.dirty = true; }
+    if (ui_button(544, 314, 230, 58, "Performance", ST.preset == P_PERFORMANCE ? 0 : 1, true, 26)) { ST.preset = P_PERFORMANCE; settings_save(); M.dirty = true; }
+    ui_paragraph(804, 318, 860, ST.preset == P_QUALITY ? "Most data and the largest picture: the sharpest text. Warmest, and wants a strong Wi-Fi link."
+                              : ST.preset == P_BALANCED ? "A good middle: sharp text without pushing the Frame or the network hard."
+                              : "Less data and a smaller picture: coolest and quietest, softer text.", 23, false, C_TEXT_DIM);
+    ui_text(56, 384, "Frame rate and bitrate apply right away. A change in picture size takes effect the next time you connect.", 19, false, C_TEXT_FAINT);
     /* start with SteamVR */
-    ui_text(56, 372, "STARTUP", 20, true, C_TEXT_FAINT);
-    if (ui_button(56, 404, 230, 64, "Off", !ST.autostart ? 0 : 1, true, 28)) { if (ST.autostart) { M.set_err[0] = 0; settings_set_autostart(false, M.set_err, sizeof M.set_err); M.dirty = true; } }
-    if (ui_button(300, 404, 230, 64, "On", ST.autostart ? 0 : 1, true, 28)) { if (!ST.autostart) { M.set_err[0] = 0; settings_set_autostart(true, M.set_err, sizeof M.set_err); M.dirty = true; } }
-    ui_paragraph(560, 408, 1100, "Start Sideframe together with SteamVR, so its tab is always in the dashboard. Off by default; turning it off removes it again.", 24, false, C_TEXT_DIM);
-    if (M.set_err[0]) ui_text(56, 480, M.set_err, 22, false, C_RED);
+    ui_text(56, 432, "STARTUP", 20, true, C_TEXT_FAINT);
+    if (ui_button(56, 460, 170, 58, "Off", !ST.autostart ? 0 : 1, true, 28)) { if (ST.autostart) { M.set_err[0] = 0; settings_set_autostart(false, M.set_err, sizeof M.set_err); M.dirty = true; } }
+    if (ui_button(240, 460, 170, 58, "On", ST.autostart ? 0 : 1, true, 28)) { if (!ST.autostart) { M.set_err[0] = 0; settings_set_autostart(true, M.set_err, sizeof M.set_err); M.dirty = true; } }
+    ui_paragraph(440, 464, 1220, "Start Sideframe together with SteamVR, so its tab is always in the dashboard. Off by default; turning it off removes it again.", 23, false, C_TEXT_DIM);
+    if (M.set_err[0]) ui_text(56, 528, M.set_err, 22, false, C_RED);
     /* about + updates + temperature */
-    ui_rrect(56, 520, 1608, 150, 24, C_CARD); ui_rrect_line(56, 520, 1608, 150, 24, 2, C_LINE);
+    ui_rrect(56, 560, 1608, 130, 24, C_CARD); ui_rrect_line(56, 560, 1608, 130, 24, 2, C_LINE);
     char b[160]; uint32_t c = C_TEXT_DIM;
-    ui_text(88, 544, "Sideframe", 28, true, C_TEXT); ui_text(88 + ui_text_w("Sideframe", 28, true) + 14, 548, SIDEFRAME_VERSION, 24, false, C_TEXT_DIM);
+    ui_text(88, 576, "Sideframe", 28, true, C_TEXT); ui_text(88 + ui_text_w("Sideframe", 28, true) + 14, 580, SIDEFRAME_VERSION, 24, false, C_TEXT_DIM);
     if (!SIDEFRAME_UPDATE_URL[0]) b[0] = 0;
     else switch (M.upd_state) {
         case 1: snprintf(b, sizeof b, "Checking for updates…"); break;
@@ -369,12 +377,12 @@ static void screen_settings(double t) {
         case 4: snprintf(b, sizeof b, "Couldn’t check for updates (no internet?)."); break;
         default: snprintf(b, sizeof b, "Updates are only checked when you press the button."); c = C_TEXT_FAINT;
     }
-    if (b[0]) ui_text(88, 592, b, 22, false, c);
-    if (SIDEFRAME_UPDATE_URL[0] && M.upd_state != 1 && ui_button(88, 620, 260, 40, "Check for updates", 1, true, 20)) menu_check_update();
+    if (b[0]) ui_text(88, 618, b, 22, false, c);
+    if (SIDEFRAME_UPDATE_URL[0] && M.upd_state != 1 && ui_button(560, 604, 250, 44, "Check for updates", 1, true, 20)) menu_check_update();
     char tb[120]; if (therm_temp_c > 0) snprintf(tb, sizeof tb, "Frame temperature %d°C  ·  %s", therm_temp_c, therm_level == 0 ? "running normally" : therm_level == 1 ? "warm: easing off to cool down" : "hot: easing off a lot");
     else snprintf(tb, sizeof tb, "Frame temperature unavailable");
-    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w(tb, 22, false), 548, tb, 22, false, therm_level ? C_AMBER : C_TEXT_DIM);
-    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w("Sideframe eases off by itself above 85°C to protect the headset.", 20, false), 592, "Sideframe eases off by itself above 85°C to protect the headset.", 20, false, C_TEXT_FAINT);
+    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w(tb, 22, false), 580, tb, 22, false, therm_level ? C_AMBER : C_TEXT_DIM);
+    ui_text(MENU_WIDTH - 56 - 32 - ui_text_w("Sideframe eases off by itself above 85°C to protect the headset.", 20, false), 618, "Sideframe eases off by itself above 85°C to protect the headset.", 20, false, C_TEXT_FAINT);
 }
 
 static void menu_draw(double t) {

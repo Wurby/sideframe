@@ -155,8 +155,8 @@ final class Server {
             else { for i in 0..<n where 12 + 2 * i + 1 < m.count { list.append(Int(m[12 + 2 * i]) << 8 | Int(m[13 + 2 * i])) } }
             for idx in list where idx < pk.count { var q = pk[idx]; q[q.startIndex + 8] |= 2; sendPlain(q); statsLock.lock(); retxSent += 1; statsLock.unlock() }
             statsLock.lock(); nacksRx += 1; statsLock.unlock()
-        case 12:  // QUALITY: seq = frame-rate ceiling (0 = none), val = percent of the automatic bitrate (clamped 25...100)
-            statsLock.lock(); wantFps = Int(min(seq, 120)); wantPct = Int(min(max(val, 25), 100)); statsLock.unlock()
+        case 12:  // QUALITY: seq = frame-rate ceiling (0 = none), val = percent of the automatic bitrate (clamped 25...200)
+            statsLock.lock(); wantFps = Int(min(seq, 120)); wantPct = Int(min(max(val, 25), 200)); statsLock.unlock()
         case 3:   // keyframe request
             statsLock.lock(); forceKey = true; keyRequests += 1; statsLock.unlock()
         case 13:  // BYE: the Frame is leaving: end the session now instead of waiting for the 4 s silence timeout

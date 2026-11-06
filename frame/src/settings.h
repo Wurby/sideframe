@@ -11,8 +11,9 @@
 #include <sys/stat.h>
 #include <time.h>
 
-enum quality { Q_SHARP = 0, Q_EFFICIENT = 1 };
-static struct settings { int quality; bool autostart; } ST = { Q_SHARP, false };
+/* Bitrate preset: how much video data the Mac sends and how large a picture the Frame hands to SteamVR. */
+enum preset { P_QUALITY = 0, P_BALANCED = 1, P_PERFORMANCE = 2 };
+static struct settings { int fps; int preset; bool autostart; } ST = { 30, P_BALANCED, false };   /* fps: the rate to aim for, 30 or 60 */
 
 static void settings_path(char *out, size_t n) { const char *h = getenv("HOME"); snprintf(out, n, "%s/.config/sideframe/settings.conf", h ? h : "."); }
 static void unit_paths(char *unit, char *link, size_t n) {
@@ -22,13 +23,21 @@ static void unit_paths(char *unit, char *link, size_t n) {
 }
 static void settings_load(void) {
     char p[PATH_MAX]; settings_path(p, sizeof p); FILE *f = fopen(p, "r");
-    if (f) { char l[128]; while (fgets(l, sizeof l, f)) { if (!strncmp(l, "quality=efficient", 17)) ST.quality = Q_EFFICIENT; else if (!strncmp(l, "quality=sharp", 13)) ST.quality = Q_SHARP; } fclose(f); }
+    if (f) {
+        char l[128];
+        while (fgets(l, sizeof l, f)) {
+            if (!strncmp(l, "fps=60", 6)) ST.fps = 60; else if (!strncmp(l, "fps=30", 6)) ST.fps = 30;
+            else if (!strncmp(l, "bitrate=quality", 15)) ST.preset = P_QUALITY; else if (!strncmp(l, "bitrate=balanced", 16)) ST.preset = P_BALANCED;
+            else if (!strncmp(l, "bitrate=performance", 19)) ST.preset = P_PERFORMANCE;
+        }
+        fclose(f);
+    }
     char u[PATH_MAX], k[PATH_MAX]; unit_paths(u, k, sizeof u); ST.autostart = access(k, F_OK) == 0;   /* the link's presence is the truth */
 }
 static void settings_save(void) {
     char p[PATH_MAX], d[PATH_MAX]; settings_path(p, sizeof p); snprintf(d, sizeof d, "%s", p); *strrchr(d, '/') = 0;
     char dd[PATH_MAX]; snprintf(dd, sizeof dd, "%s", d); *strrchr(dd, '/') = 0; mkdir(dd, 0755); mkdir(d, 0700);
-    FILE *f = fopen(p, "w"); if (!f) return; fprintf(f, "quality=%s\n", ST.quality == Q_EFFICIENT ? "efficient" : "sharp"); fclose(f);
+    FILE *f = fopen(p, "w"); if (!f) return; fprintf(f, "fps=%d\nbitrate=%s\n", ST.fps, ST.preset == P_QUALITY ? "quality" : ST.preset == P_PERFORMANCE ? "performance" : "balanced"); fclose(f);
 }
 
 /* Opt-in: start the tab together with SteamVR (a user systemd unit like other dashboard apps use). Nothing is installed unless the user turns this on. */
@@ -75,11 +84,18 @@ static bool therm_poll(double t) {
 
 /* What the settings and the temperature add up to */
 static double eff_min_interval(void) {            /* seconds between overlay updates */
-    double q = ST.quality == Q_EFFICIENT ? 1.0 / 20 : 1.0 / 30;
+    double q = ST.fps >= 60 ? 1.0 / 60 : 1.0 / 30;
     double th = therm_level == 2 ? 1.0 / 8 : therm_level == 1 ? 1.0 / 15 : 0;
     return th > q ? th : q;
 }
-static double eff_size_factor(void) { return ST.quality == Q_EFFICIENT ? 1.0 : 1.5; }   /* x the headset's render width: widest texture sent */
-static int eff_mac_fps(void) { int f = (int)(1.0 / eff_min_interval() + 0.5); return f < 8 ? 8 : f; }   /* the Mac sends only as many pictures as we will show: each one then gets more bits */
-static int eff_mac_bitrate_pct(void) { return therm_level ? 50 : ST.quality == Q_EFFICIENT ? 60 : 100; }
+/* widest texture sent, as a multiple of the headset's render width */
+static double eff_size_factor(void) { return ST.preset == P_QUALITY ? 1.5 : ST.preset == P_BALANCED ? 1.2 : 1.0; }
+static int eff_mac_fps(void) { int f = (int)(1.0 / eff_min_interval() + 0.5); return f < 8 ? 8 : f; }   /* the Mac sends only as many pictures as we will show */
+/* percent of the Mac's automatic bitrate (about 5 Mbps per megapixel) */
+static int eff_mac_bitrate_pct(void) {
+    int p = ST.preset == P_QUALITY ? 140 : ST.preset == P_BALANCED ? 100 : 60;
+    if (ST.fps >= 60) p = p * 3 / 2 > 200 ? 200 : p * 3 / 2;     /* twice the pictures need more data to look as good */
+    if (therm_level) p = p * 6 / 10;
+    return p < 25 ? 25 : p > 200 ? 200 : p;
+}
 #endif

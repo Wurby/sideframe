@@ -81,7 +81,8 @@ Maintainers: `scripts/package-frame.sh` (on a Frame) and `scripts/package-mac.sh
 ## Settings
 
 On the Frame's home screen, **Settings**:
-* **Picture — Sharp or Efficient.** Efficient sends a slightly smaller picture with fewer updates per second and asks the Mac for less video data: cooler and quieter.
+* **Frame rate — 30 or 60.** The rate to aim for. 30 gives each picture more detail and is easier on the Frame and your Wi-Fi; 60 is smoother.
+* **Bitrate — Quality, Balanced or Performance.** How much video data the Mac sends (relative to an automatic rate of about 5 Mbps per megapixel of your display) and how large a picture the Frame hands to SteamVR. Quality is sharpest and warmest; Performance is coolest and softest.
 * **Start with SteamVR** (off by default). Installs a small user service so the tab is always in the dashboard; turning it off removes it.
 * **Temperature protection.** Above 85 °C Sideframe eases off by itself (fewer updates, less video data) and returns to normal below 80 °C.
 
