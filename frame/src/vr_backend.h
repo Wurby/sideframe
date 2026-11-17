@@ -84,8 +84,8 @@ struct tex { VkImage img; VkDeviceMemory mem; VkImageView view; VkFramebuffer fb
 static struct tex card;                  /* placeholder, CPU-drawn */
 static struct tex outt;                  /* live video target (size of the Mac display) */
 static VkBuffer stg; static VkDeviceMemory stg_mem; static uint8_t *stg_map;
-#define CARD_W 1720
-#define CARD_H 720
+#define CARD_W MENU_WIDTH     /* the menu card: one size, defined in menu.h */
+#define CARD_H MENU_HEIGHT
 
 static VkRenderPass rpass; static VkPipelineLayout pipe_layout; static VkPipeline pipeline;
 static VkDescriptorSetLayout dsl; static VkDescriptorPool dpool; static VkSampler ysampler; static VkSamplerYcbcrConversion yconv;
@@ -172,11 +172,14 @@ static double menu_draw_t;
 /* The settings cog: drawn by the picture shader into a transparent strip BESIDE the picture (never over it), so the menu is one click
  * away while streaming. Positions are in texture pixels (origin top-left); mouse events use the same size with a bottom-left origin. */
 static float cog_alpha, cog_rendered = -1, cog_cx, cog_cy, cog_r; static bool cog_over, cog_near, cog_down, cog_dirty;
+static float dis_alpha, dis_rendered = -1, dis_cy; static bool dis_over, dis_near, dis_down;   /* the disconnect button above the cog */
+static bool vr_session_up;                    /* an authenticated session with the Mac exists right now (set by the main loop): the disconnect button only shows then */
 static int side_w;                            /* width of the transparent strip beside the picture that holds the cog */
 static bool menu_over;                        /* the menu is showing over a live session (the picture is paused until "Back to Mac") */
 static int vr_last_idx = -1, vr_since_present;   /* last frame shown, to redraw it when only the cog changed (safe for a few frames: the decoder reuses buffers in order) */
-static void cog_geom(int vw, int vh) { cog_r = side_w * 0.30f; cog_cx = vw + side_w * 0.5f; cog_cy = vh - cog_r * 1.6f; }   /* in the strip beside the picture, at the bottom-right */
+static void cog_geom(int vw, int vh) { cog_r = side_w * 0.30f; cog_cx = vw + side_w * 0.5f; cog_cy = vh - cog_r * 1.6f; dis_cy = cog_cy - cog_r * 2.9f; }   /* in the strip beside the picture, at the bottom-right */
 static bool cog_hit(float x, float y, float k, int vh) { float dx = x - cog_cx, dy = (vh - y) - cog_cy; return dx * dx + dy * dy < cog_r * k * cog_r * k; }
+static bool dis_hit(float x, float y, float k, int vh) { if (!vr_session_up) return false; float dx = x - cog_cx, dy = (vh - y) - dis_cy; return dx * dx + dy * dy < cog_r * k * cog_r * k; }
 
 /* copy the staging buffer into a region of a texture; the texture ends up in COLOR_ATTACHMENT_OPTIMAL (what SteamVR is given) */
 static void upload_region(struct tex *t, int x, int y, int w, int h) {
@@ -227,7 +230,7 @@ static void vr_show_closing(void) {
 }
 
 static void vr_open_menu_over(void) {            /* the cog was clicked: Settings over the live session */
-    menu_over = true; vr_view = VIEW_MENU; M.live = true; menu_goto(SCR_SETTINGS); menu_need = true; tb_hover = tb_down = -1; cog_down = cog_over = cog_near = false;
+    menu_over = true; vr_view = VIEW_MENU; M.live = true; menu_goto(SCR_SETTINGS); menu_need = true; tb_hover = tb_down = -1; cog_down = cog_over = cog_near = false; dis_down = dis_over = dis_near = false;
     ovl->SetOverlayFlag(ov_main, VROverlayFlags_HideLaserIntersection, false);
     HmdVector2_t sc = { (float)CARD_W, (float)CARD_H }; ovl->SetOverlayMouseScale(ov_main, &sc);
     udp_msg(10, 0, 0, NULL, 0); udp_msg(11, 1, 0, NULL, 0); last_pause_t = now();        /* release held keys; the Mac stops capturing while we look at the menu */
@@ -249,7 +252,8 @@ static void vr_mouse_move(float x, float y) {
     if (vid_w <= 0 || vid_h <= 0) return;
     vr_ptr_t = now();                                       /* pointer in use: poll events faster for a while (see vr_poll) */
     cog_geom(vid_w, vid_h); cog_over = cog_hit(x, y, 1.7f, vid_h); cog_near = cog_hit(x, y, 2.6f, vid_h);
-    if (cog_over) return;                                    /* over the cog: it is ours, not the Mac's */
+    dis_over = dis_hit(x, y, 1.7f, vid_h); dis_near = dis_hit(x, y, 2.6f, vid_h);
+    if (cog_over || dis_over) return;                         /* over the cog or the disconnect button: they are ours, not the Mac's */
     if (x >= vid_w) return;                                  /* in the strip beside the picture: nothing for the Mac */
     double nx = x / vid_w, ny = 1.0 - y / vid_h;            /* overlay origin is bottom-left; the Mac's is top-left */
     if (nx < 0) nx = 0; if (nx > 1) nx = 1; if (ny < 0) ny = 0; if (ny > 1) ny = 1;
@@ -264,6 +268,11 @@ static void vr_mouse_button(bool down, uint32_t button) {
     if (button == 1 && (cog_over || cog_down)) {                /* the cog: press and release on it opens Settings */
         if (down) cog_down = true;
         else { bool fire = cog_down && cog_over; cog_down = false; if (fire) vr_open_menu_over(); }
+        return;
+    }
+    if (button == 1 && (dis_over || dis_down)) {                /* the power button: press and release on it disconnects */
+        if (down) dis_down = true;
+        else { bool fire = dis_down && dis_over; dis_down = false; if (fire) { dis_over = dis_near = false; vr_toolbar_action = 1; } }   /* same path as Disconnect in the menu */
         return;
     }
     int mb = button == 1 ? 0 : button == 2 ? 1 : 2;           /* OpenVR left/right/middle (1/2/4-ish) -> Mac 0/1/2 */
@@ -502,7 +511,7 @@ static void vr_present(int i) {
     vkCmdSetViewport(cmd, 0, 1, &vpt); vkCmdSetScissor(cmd, 0, 1, &sc);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout, 0, 1, &m->ds, 0, NULL);
-    cog_geom(vid_w, vid_h); float pc[8] = { cog_cx, cog_cy, cog_r, cog_alpha, 0, 0, 0, 0 };
+    cog_geom(vid_w, vid_h); float pc[8] = { cog_cx, cog_cy, cog_r, cog_alpha, 0, dis_cy, vr_session_up ? dis_alpha : 0.0f, 0 };
     vkCmdPushConstants(cmd, pipe_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
     vkCmdDraw(cmd, 3, 1, 0, 0);                                                /* the picture */
     VkViewport sv = { (float)vid_w, 0, (float)side_w, (float)vid_h, 0, 1 }; VkRect2D ss = { { vid_w, 0 }, { (uint32_t)side_w, (uint32_t)vid_h } };
@@ -519,7 +528,7 @@ static void vr_present(int i) {
         img_barrier(cmd, outt.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, VK_ACCESS_MEMORY_READ_BIT, VK_ACCESS_MEMORY_WRITE_BIT);
     }
     submit_wait();
-    m->used = true; vr_last_idx = i; vr_since_present = 0; cog_rendered = cog_alpha; cog_dirty = false;
+    m->used = true; vr_last_idx = i; vr_since_present = 0; cog_rendered = cog_alpha; dis_rendered = dis_alpha; cog_dirty = false;
     if (vr_view != VIEW_STREAM) vr_enter_stream();   /* first picture is ready: show the stream view with its toolbar */
     if (checking) {
         vr_checks_left--;
@@ -591,13 +600,15 @@ static void vr_teardown_output(void) {
 /* ------------------------------------------------------------------ events, visibility, drawing */
 static void vr_poll(void) {
     double t = now();
-    if (getenv("MD_VR_COG")) { cog_alpha = (float)atof(getenv("MD_VR_COG")); }
+    if (getenv("MD_VR_COG")) { cog_alpha = dis_alpha = (float)atof(getenv("MD_VR_COG")); }
     if (M.action == ACT_RESUME) { M.action = ACT_NONE; if (menu_over) vr_resume_stream(); }
     if (vr_view == VIEW_STREAM && !menu_over) {   /* the cog brightens as the laser nears it */
         static double lt; float dt = lt ? (float)(t - lt) : 0; lt = t; if (dt > 0.2f) dt = 0.2f;
         float target = cog_over ? 1.0f : cog_near ? 0.85f : 0.45f;   /* always there, beside the picture; brighter as the laser approaches */
         float step = 3.5f * dt; cog_alpha += cog_alpha < target ? (target - cog_alpha < step ? target - cog_alpha : step) : -(cog_alpha - target < step ? cog_alpha - target : step);
-        if (fabsf(cog_alpha - cog_rendered) > 0.04f) cog_dirty = true;
+        float dtarget = !vr_session_up ? 0.0f : dis_over ? 1.0f : dis_near ? 0.85f : 0.45f;
+        dis_alpha += dis_alpha < dtarget ? (dtarget - dis_alpha < step ? dtarget - dis_alpha : step) : -(dis_alpha - dtarget < step ? dis_alpha - dtarget : step);
+        if (fabsf(cog_alpha - cog_rendered) > 0.04f || fabsf(dis_alpha - dis_rendered) > 0.04f) cog_dirty = true;
     }
     if (t - vr_ev_t >= (vr_view == VIEW_STREAM && t - vr_ptr_t < 1.0 ? 0.008 : 0.033)) {                 /* every overlay-event poll is an IPC round trip to SteamVR: at most ~30 per second */
         vr_ev_t = t;

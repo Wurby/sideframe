@@ -117,7 +117,7 @@ final class Capture: NSObject, SCStreamOutput {
     // quality requested by the Frame (Stats: wantFps / wantPct) applied to the running capture
     var stream: SCStream?; var cfg: SCStreamConfiguration?
     var baseFps = 60, baseBitrate = 20_000_000
-    private var appliedFps = 0, appliedPct = 100, appliedQP = 0
+    private var appliedFps = 0, appliedPct = 100, appliedQP = 0, lastAppliedMsgNs: UInt64 = 0
     func applyWantedQuality() {
         statsLock.lock(); let wf = wantFps, wp = wantPct, wq = wantMaxQP; statsLock.unlock()
         let fps = wf > 0 ? min(wf, baseFps) : baseFps
@@ -128,6 +128,12 @@ final class Capture: NSObject, SCStreamOutput {
         }
         if wq != appliedQP, wq > 0 { appliedQP = wq; enc.setMaxQP(wq) }
         if wp != appliedPct { appliedPct = wp; enc.setBitrate(baseBitrate * wp / 100); print("bitrate set to \(baseBitrate * wp / 100 / 1_000_000) Mbps (\(wp)%)") }
+        // tell the Frame what is actually in effect (it shows this in Settings > Advanced); repeated every 2 s so a lost packet or a reconnect heals
+        let now = nowNs()
+        if now &- lastAppliedMsgNs > 2_000_000_000 {
+            lastAppliedMsgNs = now
+            Server.shared.sendStatus(0x21, byte1: UInt8(truncatingIfNeeded: appliedQP), a: UInt32(max(fps, 0)) << 16 | UInt32(max(appliedPct, 0)), b: UInt32(max(baseBitrate * appliedPct / 100 / 1000, 0)))
+        }
     }
     private var lastPB: CVPixelBuffer?
     private var lastEncodeNs: UInt64 = 0

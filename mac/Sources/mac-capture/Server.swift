@@ -91,7 +91,16 @@ final class Server {
         case 0x01 where pkt.count == 41:   // HELLO: kid(8) cn(16) tag(16)
             let kid = Data(pkt[(b + 1)..<(b + 9)]), cn = Data(pkt[(b + 9)..<(b + 25)]), tag = Data(pkt[(b + 25)..<(b + 41)])
             guard let psk = KeyStore.shared.key(forKid: kid.hex),
-                  constantTimeEqual(tag, Handshake.helloTag(psk, kid: kid, cn: cn)) else { rejected += 1; if debug { print("  HELLO rejected (unknown key id or bad tag)") }; return }
+                  constantTimeEqual(tag, Handshake.helloTag(psk, kid: kid, cn: cn)) else {
+                rejected += 1; if debug { print("  HELLO rejected (unknown key id or bad tag)") }
+                // Still no reply (see the protocol doc), but leave a trace in the log so "why won't it connect" can be answered. At most once a minute per key id.
+                let known = KeyStore.shared.key(forKid: kid.hex) != nil, nowS = Double(nowNs()) / 1e9
+                if nowS - (lastRejectLog[kid.hex] ?? -1e9) > 60 {
+                    lastRejectLog[kid.hex] = nowS
+                    print(known ? "A Frame (key \(kid.hex.prefix(8))) tried to connect but its proof didn't match — pair it again if this keeps happening"
+                                : "A Frame (key \(kid.hex.prefix(8))) tried to connect, but this Mac doesn't have it paired (forgotten, or paired with a different Mac). Pair it again from the menu.")
+                }
+                return }
             let sn = randomBytes(16)
             lock.lock(); pendingSession = SecureSession(psk: psk, cn: cn, sn: sn, server: true); pendingName = KeyStore.shared.name(forKid: kid.hex) ?? "Steam Frame"
             pendingPeer = sa; pendingAtNs = nowNs(); lock.unlock()
@@ -106,6 +115,7 @@ final class Server {
         }
     }
 
+    private var lastRejectLog: [String: Double] = [:]
     private func handleData(_ pkt: Data, from sa: sockaddr_in) {
         lock.lock(); let act = active, ap = peer, pend = pendingSession, pp = pendingPeer, pat = pendingAtNs, pname = pendingName; lock.unlock()
         if let act, sockaddrEqual(ap, sa), let plain = act.open(pkt) {
@@ -157,6 +167,9 @@ final class Server {
             statsLock.lock(); nacksRx += 1; statsLock.unlock()
         case 12:  // QUALITY: seq = frame-rate ceiling (0 = none), val = percent of the automatic bitrate (clamped 25...200)
             statsLock.lock(); wantFps = Int(min(seq, 120)); wantPct = Int(min(max(val & 0xFFFF, 25), 200)); let q = Int(val >> 16); wantMaxQP = (q >= 16 && q <= 51) ? q : 0; statsLock.unlock()
+        case 14:  // VERSION: the Frame's protocol version (seq) and app version (val); we answer with ours
+            print("Frame app \(describeVersion(val)), protocol \(seq)")
+            sendStatus(0x20, byte1: UInt8(protocolVersion), a: appVersionPacked(), b: 0)
         case 3:   // keyframe request
             statsLock.lock(); forceKey = true; keyRequests += 1; statsLock.unlock()
         case 13:  // BYE: the Frame is leaving: end the session now instead of waiting for the 4 s silence timeout
@@ -170,6 +183,15 @@ final class Server {
         default:
             onInput?(type, m)
         }
+    }
+
+    /// Mac->Frame status message: [u8 type][u8 byte1][u16 0][u32 a][u32 b] (12 bytes, shorter than a video packet, so older Frames ignore it)
+    ///   0x20 VERSION: byte1 = protocol version, a = app version (major<<16 | minor<<8 | patch)
+    ///   0x21 APPLIED: byte1 = encoder QP ceiling (0 = default), a = fps<<16 | percent of the automatic bitrate, b = target bitrate in kbit/s
+    func sendStatus(_ type: UInt8, byte1: UInt8, a: UInt32, b: UInt32) {
+        var d = Data([type, byte1, 0, 0])
+        for v in [a, b] { var be = v.bigEndian; d.append(Data(bytes: &be, count: 4)) }
+        sendPlain(d)
     }
 
     private func watchdog() {
@@ -203,3 +225,12 @@ final class Server {
         for (i, p) in pkts.enumerated() { sendPlain(p); if i % 12 == 11 { usleep(250) } }   // light pacing: don't dump a keyframe on the AP at once
     }
 }
+
+/// Wire protocol version spoken by this build (docs/PROTOCOL.md). Bump only for a change older apps cannot ignore.
+let protocolVersion = 1
+func appVersionPacked() -> UInt32 {
+    let s = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.0"
+    let p = s.split(separator: ".").map { UInt32($0) ?? 0 } + [0, 0, 0]
+    return p[0] << 16 | p[1] << 8 | p[2]
+}
+func describeVersion(_ v: UInt32) -> String { "\(v >> 16).\((v >> 8) & 255).\(v & 255)" }

@@ -12,6 +12,8 @@ SRC=Sources/mac-capture
 swiftc -O -parse-as-library -o "$APP/Contents/MacOS/Sideframe" \
     App/AppMain.swift $SRC/Config.swift $SRC/Stats.swift $SRC/Crypto.swift $SRC/KeyStore.swift $SRC/Pairing.swift $SRC/Input.swift $SRC/Server.swift $SRC/Capture.swift
 cp App/Info.plist "$APP/Contents/Info.plist"
+V=$(cat ../VERSION 2>/dev/null || echo 0.0.0)   # the app reports the project version (also sent to the Frame)
+plutil -replace CFBundleShortVersionString -string "$V" "$APP/Contents/Info.plist" 2>/dev/null || true
 if [ -f App/AppIcon-1024.png ]; then
     ICONSET=$(mktemp -d)/AppIcon.iconset; mkdir -p "$ICONSET"
     for s in 16 32 128 256 512; do

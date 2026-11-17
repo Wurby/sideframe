@@ -38,6 +38,10 @@ static void av_packet_unref(AVPacket *p) { (void)p; }
 #include <netdb.h>
 #include <sodium.h>
 #include "mdcrypto.h"
+#include "linkstats.h"
+#ifndef SIDEFRAME_VERSION
+#define SIDEFRAME_VERSION "dev"
+#endif
 #include "pairing_client.h"
 #include <math.h>
 #include <linux/input-event-codes.h>
@@ -62,6 +66,7 @@ static void av_packet_unref(AVPacket *p) { (void)p; }
 #define CHK(x) do { if ((x) < 0) { fprintf(stderr, "%s:%d %s failed: %s\n", __FILE__, __LINE__, #x, strerror(errno)); exit(1); } } while (0)
 
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
+static double rt_now(void) { struct timespec t; clock_gettime(CLOCK_REALTIME, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 static int xioctl(int fd, unsigned long r, void *a) { int x; do x = ioctl(fd, r, a); while (x == -1 && errno == EINTR); return x; }
 
 #ifndef MD_VR
@@ -335,7 +340,7 @@ static double deadline(void) { double d = 3 * u_srtt; return d < U_DEADLINE ? U_
 static struct ufr ur[URING];
 static uint32_t u_expected, u_high; static bool u_synced, u_any;
 static int u_release = -1; static double u_gap_t, u_nack_t, u_key_t;
-static unsigned long u_pk, u_retx_rx, u_nack_tx, u_resync, u_dup, u_skipped;
+static unsigned long u_pk, u_retx_rx, u_nack_tx, u_resync, u_dup, u_skipped, u_bytes;
 /* ---- connection state machine: HELLO until WELCOME, then session; fall back to HELLO if the Mac goes silent ---- */
 static struct sockaddr_in hello_addr, peer_addr;   /* hello_addr: what the user typed; peer_addr: where the Mac actually answers from (it may be multi-homed) */
 static bool net_up; static uint8_t cn[16]; static double hello_t, last_rx; static unsigned long u_auth_fail;
@@ -365,6 +370,7 @@ static bool udp_connect(const char *host, int port) {
     if (ufd >= 0) close(ufd);
     ufd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
     int sz = 8 << 20; setsockopt(ufd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
+    { int on = 1; setsockopt(ufd, SOL_SOCKET, SO_TIMESTAMPNS, &on, sizeof on); }   /* the kernel stamps each packet on arrival, so the round trip excludes how busy this program is */
     memcpy(&hello_addr, res->ai_addr, sizeof hello_addr); peer_addr = hello_addr;   /* unconnected socket: authenticated replies may come from another address of the Mac */
     freeaddrinfo(res);
     randombytes_buf(cn, sizeof cn);
@@ -377,11 +383,22 @@ static void net_hello(void) {
     sendto(ufd, p, sizeof p, MSG_DONTWAIT, (void *)&hello_addr, sizeof hello_addr);
 }
 static void udp_free_all(void) { for (int i = 0; i < URING; i++) ur[i].used = false; u_release = -1; }
+/* The Mac's address can change under us (the Frame joined another Wi-Fi network): aim our HELLOs at where it is advertising now. */
+static bool udp_retarget(const char *ip, int port) {
+    struct sockaddr_in a; memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, ip, &a.sin_addr) != 1) return false;
+    if (a.sin_addr.s_addr == hello_addr.sin_addr.s_addr && a.sin_port == hello_addr.sin_port) return false;
+    hello_addr = a; peer_addr = a; hello_t = 0;
+    fprintf(stderr, "the Mac is now at %s:%d — aiming at that\n", ip, port); return true;
+}
 static void net_session_up(const uint8_t sn[16]) {
     sess_derive(&S, cn, sn, false); net_up = true; last_rx = now();
     udp_free_all(); u_synced = false; u_any = false; u_gap_t = 0; u_key_t = now();
     fprintf(stderr, "authenticated with the Mac — encrypted session up\n");
     udp_msg(3, 0, 0, NULL, 0);   /* first DATA packet: proves we completed the handshake, and asks for a keyframe */
+    ls_session_reset(peer_addr.sin_addr.s_addr);
+    udp_msg(14, PROTOCOL_VERSION, ls_pack_version(SIDEFRAME_VERSION), NULL, 0);   /* tell the Mac our versions; a current Mac answers with its own (0x20) */
+    LS.hello_t = now(); LS.hello_tries = 1;
 }
 static void udp_resync(uint32_t consumed_through) {
     udp_free_all(); u_synced = false; u_gap_t = 0; u_resync++;
@@ -402,8 +419,12 @@ static int udp_next(uint8_t **d, size_t *n) {
     uint8_t raw[1600], pkt[1600];
     for (;;) {
         struct sockaddr_in from; socklen_t fl = sizeof from;
-        ssize_t rr = recvfrom(ufd, raw, sizeof raw, 0, (void *)&from, &fl);
+        struct iovec iov = { raw, sizeof raw }; char ctl[128]; struct msghdr mh = { .msg_name = &from, .msg_namelen = fl, .msg_iov = &iov, .msg_iovlen = 1, .msg_control = ctl, .msg_controllen = sizeof ctl };
+        ssize_t rr = recvmsg(ufd, &mh, 0);
         if (rr < 0) break;
+        double rx_rt = rt_now();                                   /* wall-clock arrival time: the kernel's stamp if it gave one */
+        for (struct cmsghdr *cm = CMSG_FIRSTHDR(&mh); cm; cm = CMSG_NXTHDR(&mh, cm))
+            if (cm->cmsg_level == SOL_SOCKET && cm->cmsg_type == SCM_TIMESTAMPNS) { struct timespec kt; memcpy(&kt, CMSG_DATA(cm), sizeof kt); rx_rt = kt.tv_sec + kt.tv_nsec * 1e-9; }
         if (rr == 33 && raw[0] == 2 && !net_up) {   /* WELCOME */
             uint8_t tag[16]; hmac16(tag, "sideframe-welcome", cn, 16, raw + 1, 16);
             if (sodium_memcmp(tag, raw + 17, 16) == 0) { peer_addr = from; net_session_up(raw + 1); } else u_auth_fail++;
@@ -415,16 +436,17 @@ static int udp_next(uint8_t **d, size_t *n) {
         ssize_t r = (ssize_t)plen;
         if (r == 12 && pkt[0] == 4) {   // echo of our ping: real round-trip time
             uint32_t v = ((uint32_t)pkt[8] << 24) | (pkt[9] << 16) | (pkt[10] << 8) | pkt[11];
-            double rtt = (uint32_t)((uint32_t)(uint64_t)(now() * 1e6) - v) / 1e6;
-            if (rtt >= 0 && rtt < 2.0) { u_srtt = u_rtt_n++ ? 0.8 * u_srtt + 0.2 * rtt : rtt; }
+            double rtt = (uint32_t)((uint32_t)(uint64_t)(rx_rt * 1e6) - v) / 1e6;   /* v: our send time in wall-clock microseconds */
+            if (rtt >= 0 && rtt < 2.0) { u_srtt = u_rtt_n++ ? 0.8 * u_srtt + 0.2 * rtt : rtt; ls_rtt_add(rtt); }
             continue;
         }
+        if (r == 12 && (pkt[0] == 0x20 || pkt[0] == 0x21)) { ls_mac_status(pkt); if (pkt[0] == 0x21) LS.ap_t = now(); continue; }   /* Mac status: version / what it applied */
         if (r < 16) continue;
         uint32_t seq = ((uint32_t)pkt[0] << 24) | (pkt[1] << 16) | (pkt[2] << 8) | pkt[3];
         uint16_t idx = (pkt[4] << 8) | pkt[5], cnt = (pkt[6] << 8) | pkt[7], len = (pkt[10] << 8) | pkt[11];
         uint8_t flags = pkt[8]; uint32_t total = ((uint32_t)pkt[12] << 24) | (pkt[13] << 16) | (pkt[14] << 8) | pkt[15];
         if (len != r - 16 || cnt == 0 || idx >= cnt || cnt > 8192 || total > OUT_SIZE || len > UPAY) continue;
-        u_pk++;
+        u_pk++; u_bytes += len;
         if (u_synced && (int32_t)(seq - u_expected) < 0) { u_dup++; continue; }
         struct ufr *f = &ur[seq % URING];
         if (f->used && f->seq != seq) { if ((int32_t)(f->seq - seq) > 0) continue; f->used = false; }
@@ -439,8 +461,13 @@ static int udp_next(uint8_t **d, size_t *n) {
         if (!u_any || (int32_t)(seq - u_high) > 0) { u_high = seq; u_any = true; }
     }
     double t = now();
+    ls_tick(t, net_up, n_present, u_bytes, u_pk, u_retx_rx, u_resync);
+#ifdef MD_VR
+    if (vr_session_up != net_up) { vr_session_up = net_up; cog_dirty = true; if (!net_up) dis_over = dis_near = dis_down = false; }   /* the disconnect button follows the session */
+#endif
     if (!net_up) return 0;
-    if (t - u_ping_t > 0.25) { udp_msg(4, 0, (uint32_t)(uint64_t)(t * 1e6), NULL, 0); u_ping_t = t; }
+    if (t - u_ping_t > 0.25) { udp_msg(4, 0, (uint32_t)(uint64_t)(rt_now() * 1e6), NULL, 0); u_ping_t = t; }
+    if (net_up && !LS.mac_proto && LS.hello_tries && LS.hello_tries < 4 && t - LS.hello_t > 3.0) { udp_msg(14, PROTOCOL_VERSION, ls_pack_version(SIDEFRAME_VERSION), NULL, 0); LS.hello_t = t; LS.hello_tries++; }   /* an older Mac never answers: give up after 3 tries */
     if (!u_synced) {   // wait for the first COMPLETE keyframe; start decoding there
         int best = -1;
         for (int i = 0; i < URING; i++) if (ur[i].used && ur[i].key && ur[i].got == ur[i].cnt && (best < 0 || (int32_t)(ur[i].seq - ur[best].seq) < 0)) best = i;
@@ -704,7 +731,9 @@ int main(int argc, char **argv) {
             if (M.action == ACT_CANCEL_CONNECT) { M.action = ACT_NONE; if (streaming) { session_stop(); streaming = false; } menu_goto(SCR_HOME); continue; }
             if (M.action == ACT_CONNECT) {
                 M.action = ACT_NONE; char err[200] = {0};
-                if (session_start(&M.target, err, sizeof err)) {
+                struct mac_conf mc = M.target; struct disc_mac *dm0 = disc_find_id(mc.id);
+                if (dm0 && dm0->ip[0] && disc_now() - dm0->seen < 30) { snprintf(mc.host, sizeof mc.host, "%s", dm0->ip); if (dm0->port > 0) mc.port = dm0->port; }   /* where the Mac is right now beats the address saved at pairing */
+                if (session_start(&mc, err, sizeof err)) {
                     streaming = true; have_pkt = eof = stop_sent = drained = false;
                     M.scr = SCR_CONNECTING; M.connect_t0 = tn; last_net_up = tn; net_up_since = 0; M.dirty = true;
                 } else { menu_banner(C_RED, err); menu_goto(SCR_HOME); }
@@ -714,12 +743,19 @@ int main(int argc, char **argv) {
                 if (vr_view == VIEW_MENU) {                  /* still connecting (or reconnecting) */
                     snprintf(M.connect_status, sizeof M.connect_status, "%s", !net_is_up() ? "Contacting the Mac…" : "Connected. Waiting for the Mac’s screen…");
                     bool fail = false; char b[360] = {0}; uint32_t col = C_RED;
-                    if (!net_is_up() && tn - M.connect_t0 > 7) {
+                    struct disc_mac *dm = disc_find_id(M.target.id);
+                    if (!net_is_up() && dm && dm->ip[0] && disc_now() - dm->seen < 10 && tn - last_net_up > 2) udp_retarget(dm->ip, dm->port > 0 ? dm->port : M.target.port);
+                    if (net_is_up()) M.repair_strikes = 0;
+                    if (!net_is_up() && !health_has_network()) {                 /* no Wi-Fi at the moment (switching networks?): wait, don't give up */
+                        snprintf(M.connect_status, sizeof M.connect_status, "Waiting for Wi-Fi…"); M.connect_t0 = tn;
+                    } else if (!net_is_up() && tn - M.connect_t0 > 12) {
                         fail = true;
                         int idx = -1; for (int i = 0; i < M.nmacs; i++) if (!strcmp(M.macs[i].id, M.target.id)) idx = i;
-                        if (disc_find_id(M.target.id)) {     /* the Mac is on the network but ignores us: it doesn't know this Frame any more */
-                            snprintf(b, sizeof b, "“%s” is on your network but doesn’t recognize this Frame. It was probably forgotten on the Mac. Tap Pair again.", M.target.name);
-                            if (idx >= 0) M.needs_repair[idx] = true;
+                        if (dm && disc_now() - dm->seen < 6) {     /* the Mac is on the network right now but never answers us */
+                            if (++M.repair_strikes >= 2) {         /* twice in a row: it has probably forgotten this Frame */
+                                snprintf(b, sizeof b, "“%s” is on your network but doesn’t recognize this Frame. It was probably forgotten on the Mac. Tap Pair again.", M.target.name);
+                                if (idx >= 0) M.needs_repair[idx] = true;
+                            } else snprintf(b, sizeof b, "“%s” is on your network but didn’t answer. Try again in a moment. If it keeps happening, tap Pair again.", M.target.name);
                             col = C_AMBER;
                         } else snprintf(b, sizeof b, "Couldn’t reach “%s”. Is the Mac awake, with Sideframe running (its icon is in the menu bar)?", M.target.name);
                     } else if (net_is_up() && !vr_have_video && net_up_since && tn - net_up_since > 14) {

@@ -61,7 +61,13 @@ Receivers keep a 2048-packet replay window and only update it after authenticati
 Frame→Mac control: `[type u8][flags u8][n u16][a u32][b u32]` (+ n bytes payload)
 1 ack (a = highest consumed frame, b = µs from receipt to presentation or 0xFFFFFFFF) · 2 NACK (a = frame, n fragment indices; n=0xFFFF = whole frame) ·
 3 keyframe request · 4 ping (echoed) · 5–10 input (section 7) · 11 pause/resume (a ≠ 0: the Frame's tab is hidden, stop sending) ·
-12 quality (a = frame-rate ceiling, 0 = none; b = percent of the Mac's automatic bitrate, 25…100; re-sent every ~2 s while streaming, unknown to older Macs and ignored by them) · 13 bye.
+12 quality (a = frame-rate ceiling, 0 = none; b = percent of the Mac's automatic bitrate, 25…200 in the low 16 bits and the encoder QP ceiling in the high 16 bits, 0 = encoder default; re-sent every ~2 s while streaming, unknown to older Macs and ignored by them) · 13 bye ·
+14 version (a = protocol version, b = the Frame app's version as major<<16 | minor<<8 | patch; sent when the session starts and up to 3 more times until the Mac answers; older Macs ignore it).
+
+Mac→Frame status, 12 bytes `[type u8][byte1 u8][0][0][a u32][b u32]` (shorter than a video packet, so older Frames ignore it; type 4 is the ping echo):
+0x20 version (byte1 = protocol version, a = the Mac app's version, same packing; the answer to type 14) ·
+0x21 applied (byte1 = encoder QP ceiling in effect, 0 = default; a = frame rate << 16 | percent of the automatic bitrate; b = target bitrate in kbit/s; sent every ~2 s while streaming).
+The Frame shows these in Settings > Advanced. A Mac that never answers type 14 is shown as an older app version.
 
 The Mac chooses its own bitrate from the size of the mirrored display (about 5 Mbps per megapixel, 8…50 Mbps) and re-sends the last picture twice after the screen has been still for ~0.35 s so static text sharpens.
 

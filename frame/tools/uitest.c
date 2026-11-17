@@ -1,5 +1,5 @@
 // uitest — renders every menu screen to a PPM file so the layout can be checked without a headset.
-//   gcc -O2 -I../src $(pkg-config --cflags freetype2) -o uitest uitest.c $(pkg-config --libs freetype2) -lm -lpthread   ; ./uitest outdir
+//   gcc -O2 -I../src $(pkg-config --cflags freetype2) -o uitest uitest.c $(pkg-config --libs freetype2 libsodium) -lm -lpthread   ; ./uitest outdir
 #define _GNU_SOURCE
 #include "../src/menu.h"
 
@@ -45,6 +45,13 @@ int main(int argc, char **argv) {
     M.scr = SCR_SETTINGS; therm_temp_c = 72; therm_level = 0; M.upd_state = 2; UI.mx = 200; UI.my = 600; menu_draw(0); dump(dir, "13_settings");
     therm_temp_c = 88; therm_level = 1; ST.fps = 60; ST.preset = P_QUALITY; ST.autostart = true; M.upd_state = 3; snprintf(M.upd_ver, sizeof M.upd_ver, "0.2.0"); menu_draw(0); dump(dir, "13b_settings_warm");
     therm_level = 0; ST.fps = 30; ST.preset = P_BALANCED; ST.autostart = false; M.upd_state = 0;
+    /* Settings > Advanced (sample numbers) and the Direct link instructions */
+    memset(&adv_ni, 0, sizeof adv_ni); adv_ni.ok = adv_ni.wifi = adv_ni.direct = true; snprintf(adv_ni.name, sizeof adv_ni.name, "Alex’s MacBook Air"); adv_ni.freq = 5200; adv_ni.rate = 1200.9; adv_ni.width = 80; adv_ni.signal = -35; adv_ni_t = 1e9;
+    LS.ring_n = 100; LS.rtt50 = 3.7; LS.rtt95 = 8.2; LS.fps = 30; LS.mbps = 24.6; LS.repair_pct = 0.1; LS.mac_proto = 1; LS.mac_app = ls_pack_version("0.1.1"); LS.ap_fps = 30; LS.ap_kbps = 25000; LS.ap_qp = 26;
+    LR_N = 0; { struct netinfo home = { .ok = true, .wifi = true, .freq = 5805, .rate = 540 }; snprintf(home.name, sizeof home.name, "HomeNetwork"); ls_links_store(&home, 4.2, 32, 3.8, 1.4, 120); ls_links_store(&adv_ni, 3.7, 8.2, 0.1, 0.0, 90); }
+    M.scr = SCR_ADVANCED; menu_draw(0); dump(dir, "15_advanced");
+    LR_N = 1; menu_draw(0); dump(dir, "15b_advanced_no_compare");
+    M.scr = SCR_DIRECT; menu_draw(0); dump(dir, "16_direct_link");
     M.scr = SCR_PAIRING; menu_draw(0.3); dump(dir, "9_pairing");
     M.scr = SCR_CLOSING; menu_draw(0); dump(dir, "11_closing");
     M.scr = SCR_CONNECTING; snprintf(M.target.name, sizeof M.target.name, "Alex’s MacBook Air"); snprintf(M.connect_status, sizeof M.connect_status, "Waiting for the Mac to answer…"); menu_draw(0.3); dump(dir, "10_connecting");
